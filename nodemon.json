@@ -1,0 +1,14 @@
+{
+  "ignore": [
+    "cache",
+    "cache/**",
+    "cache/**/*",
+    "cache/**/*.json",
+    "node_modules"
+  ],
+  "watch": [
+    "src"
+  ],
+  "ext": "js"
+}
+
