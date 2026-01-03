@@ -1,3 +1,10 @@
+// Load environment variables from .env file if it exists
+try {
+  require('dotenv').config();
+} catch (e) {
+  // dotenv not installed, continue without it
+}
+
 const express = require('express');
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const logger = require('./utils/logger');

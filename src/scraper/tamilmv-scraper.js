@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../utils/logger');
 const constants = require('../utils/constants');
+const TMDBClient = require('../integrations/tmdb-client');
 const { 
   parseMovieListings, 
   extractLanguage, 
@@ -23,7 +24,8 @@ const {
   structureEpisodeStreamsForStremio,
   normalizeTitle,
   extractYear,
-  parseQuality
+  parseQuality,
+  cleanTitleForTMDB
 } = require('./extractors');
 
 class TamilMVScraper {
@@ -31,6 +33,19 @@ class TamilMVScraper {
     this.baseUrl = constants.BASE_URL;
     this.languages = Object.values(constants.LANGUAGES);
     this.requestDelay = 1000; // 1 second delay between requests
+    
+    // Initialize TMDB client
+    // Check both constants and process.env directly (Bun loads .env automatically)
+    const apiKey = constants.TMDB_API_KEY || process.env.TMDB_API_KEY;
+    if (apiKey && apiKey.trim().length > 0) {
+      this.tmdbClient = new TMDBClient(apiKey.trim());
+      logger.info(`TMDB client initialized with API key (length: ${apiKey.trim().length})`);
+    } else {
+      this.tmdbClient = null;
+      logger.warn('TMDB API key not found. Set TMDB_API_KEY environment variable or in .env file');
+      logger.debug('Checked constants.TMDB_API_KEY:', constants.TMDB_API_KEY ? 'exists' : 'null');
+      logger.debug('Checked process.env.TMDB_API_KEY:', process.env.TMDB_API_KEY ? 'exists' : 'undefined');
+    }
   }
 
   /**
@@ -203,8 +218,16 @@ class TamilMVScraper {
       }
     }
 
-    logger.success(`Scrape completed: ${processed} processed, ${skipped} skipped`);
+    logger.success(`Phase 1 completed: ${processed} processed, ${skipped} skipped`);
     logger.info(`Movies: ${Object.keys(result.movies).length}, Series: ${Object.keys(result.series).length}`);
+    
+    // Phase 2: Batch TMDB Enrichment
+    if (this.tmdbClient && Object.keys(result.movies).length > 0) {
+      logger.info('Starting Phase 2: Batch TMDB enrichment...');
+      await this.enrichWithTMDB(result);
+    } else if (!this.tmdbClient) {
+      logger.warn('TMDB client not available (no API key), skipping enrichment');
+    }
     
     // Log catalog stats
     for (const [lang, items] of Object.entries(result.catalogs)) {
@@ -213,7 +236,182 @@ class TamilMVScraper {
       }
     }
 
+    logger.success(`Scrape completed: ${processed} processed, ${skipped} skipped`);
     return result;
+  }
+
+  /**
+   * Phase 2: Batch enrich all movies with TMDB metadata
+   * @param {Object} result - Scraped data result object
+   */
+  async enrichWithTMDB(result) {
+    if (!this.tmdbClient) {
+      logger.warn('TMDB client not available, skipping enrichment');
+      return;
+    }
+
+    try {
+      const movies = Object.values(result.movies);
+      const movieIds = Object.keys(result.movies);
+      
+      if (movies.length === 0) {
+        logger.debug('No movies to enrich with TMDB');
+        return;
+      }
+
+      logger.info(`Enriching ${movies.length} movies with TMDB metadata...`);
+
+      // Step 1: Prepare all movies for TMDB search
+      const searchPromises = movies.map((movieData, index) => {
+        const movieId = movieIds[index];
+        // Get title from movieData - it might be in 'name' (from structureMovieForMeta) or 'title' (from contentData)
+        const title = movieData.name || movieData.title || '';
+        
+        // Clean title for TMDB search (this also extracts year)
+        const { cleanTitle, year: extractedYear } = cleanTitleForTMDB(title);
+        // Use year from movieData if available, otherwise use extracted year
+        const searchYear = movieData.year || extractedYear;
+
+        return this.tmdbClient.searchMovie(cleanTitle, searchYear)
+          .then(searchResults => ({
+            movieId,
+            movieData,
+            searchResults,
+            cleanTitle,
+            searchYear
+          }))
+          .catch(error => {
+            logger.debug(`TMDB search failed for "${cleanTitle}":`, error.message);
+            return { movieId, movieData, searchResults: null, cleanTitle, searchYear };
+          });
+      });
+
+      // Step 2: Batch search TMDB (all in parallel)
+      logger.debug('Batch searching TMDB for all movies...');
+      const searchResults = await Promise.allSettled(searchPromises);
+      
+      // Step 3: Find best matches and prepare detail fetches
+      const detailPromises = [];
+      const enrichedMovies = {};
+
+      searchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { movieId, movieData, searchResults: tmdbResults, cleanTitle, searchYear } = result.value;
+          
+          if (!tmdbResults || tmdbResults.length === 0) {
+            // No TMDB results, keep original movie data
+            enrichedMovies[movieId] = movieData;
+            return;
+          }
+
+          // Find best match
+          const bestMatch = this.tmdbClient.findBestMatch(tmdbResults, cleanTitle, searchYear);
+          
+          if (!bestMatch || !bestMatch.id) {
+            // No good match, keep original
+            enrichedMovies[movieId] = movieData;
+            return;
+          }
+
+          // Fetch movie details
+          detailPromises.push(
+            this.tmdbClient.getMovieDetails(bestMatch.id)
+              .then(tmdbDetails => ({
+                movieId,
+                movieData,
+                tmdbDetails,
+                tmdbId: bestMatch.id
+              }))
+              .catch(error => {
+                logger.debug(`TMDB details fetch failed for ID ${bestMatch.id}:`, error.message);
+                return { movieId, movieData, tmdbDetails: null, tmdbId: bestMatch.id };
+              })
+          );
+        } else {
+          // Search failed, keep original
+          const movieId = movieIds[index];
+          enrichedMovies[movieId] = movies[index];
+        }
+      });
+
+      // Step 4: Batch fetch details (all in parallel)
+      if (detailPromises.length > 0) {
+        logger.debug(`Fetching TMDB details for ${detailPromises.length} movies...`);
+        const detailResults = await Promise.allSettled(detailPromises);
+
+        // Step 5: Enrich all movies with TMDB data
+        let successCount = 0;
+        let failCount = 0;
+
+        detailResults.forEach(result => {
+          if (result.status === 'fulfilled') {
+            const { movieId, movieData, tmdbDetails, tmdbId } = result.value;
+            
+            if (!tmdbDetails) {
+              // Details fetch failed, keep original
+              enrichedMovies[movieId] = movieData;
+              failCount++;
+              return;
+            }
+
+            // Extract metadata from TMDB
+            const tmdbMetadata = this.tmdbClient.extractMetadata(tmdbDetails);
+            
+            if (tmdbMetadata) {
+              // Merge TMDB metadata with existing movie data
+              const enriched = {
+                ...movieData,
+                poster: tmdbMetadata.poster || movieData.poster,
+                background: tmdbMetadata.background || movieData.background,
+                genres: tmdbMetadata.genres.length > 0 ? tmdbMetadata.genres : movieData.genres,
+                imdbRating: tmdbMetadata.imdbRating || movieData.imdbRating,
+                description: tmdbMetadata.description || movieData.description,
+                cast: tmdbMetadata.cast.length > 0 ? tmdbMetadata.cast : movieData.cast,
+                director: tmdbMetadata.director.length > 0 ? tmdbMetadata.director : movieData.director,
+                runtime: tmdbMetadata.runtime || movieData.runtime,
+                releaseInfo: tmdbMetadata.releaseInfo || movieData.releaseInfo,
+                tmdbId: tmdbMetadata.tmdbId
+              };
+
+              enrichedMovies[movieId] = enriched;
+              successCount++;
+            } else {
+              enrichedMovies[movieId] = movieData;
+              failCount++;
+            }
+          } else {
+            // Details fetch failed, keep original
+            const movieId = result.value?.movieId || movieIds[detailResults.indexOf(result)];
+            enrichedMovies[movieId] = movies.find(m => m.id === movieId) || movies[detailResults.indexOf(result)];
+            failCount++;
+          }
+        });
+
+        // Update result.movies with enriched versions
+        result.movies = enrichedMovies;
+
+        // Update catalog entries with enriched metadata
+        for (const [lang, catalogItems] of Object.entries(result.catalogs)) {
+          for (let i = 0; i < catalogItems.length; i++) {
+            const catalogItem = catalogItems[i];
+            if (catalogItem.type === 'movie' && enrichedMovies[catalogItem.id]) {
+              const enriched = enrichedMovies[catalogItem.id];
+              catalogItems[i] = structureMovieForCatalog(enriched);
+            }
+          }
+        }
+
+        logger.success(`TMDB enrichment completed: ${successCount} successful, ${failCount} failed`);
+      } else {
+        // No movies matched, keep originals
+        result.movies = enrichedMovies;
+        logger.warn('No TMDB matches found for any movies');
+      }
+    } catch (error) {
+      logger.error('Error during TMDB enrichment:', error.message);
+      logger.warn('Continuing with unenriched data');
+      // Don't throw - continue with original data
+    }
   }
 
 

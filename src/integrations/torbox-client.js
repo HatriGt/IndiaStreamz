@@ -73,38 +73,98 @@ class TorboxClient {
   }
 
   /**
-   * Check if magnet is already cached in Torbox
-   * @param {string} magnetLink - Magnet link to check
-   * @returns {Promise<Object|null>} - Returns cache status or null on failure
+   * Extract infoHash from magnet link
+   * @param {string} magnetLink - Magnet link
+   * @returns {string|null} - InfoHash or null
    */
-  async checkCached(magnetLink) {
+  extractInfoHash(magnetLink) {
+    if (!magnetLink) return null;
+    const match = magnetLink.match(/btih:([a-f0-9]{40})/i);
+    return match ? match[1].toLowerCase() : null;
+  }
+
+  /**
+   * Get all torrents from mylist (cached for reuse)
+   * @returns {Promise<Array>} - Returns array of torrents
+   */
+  async getMyTorrents() {
     try {
-      // Torbox API expects multipart/form-data for POST, or query params for GET
-      // Try POST first with multipart/form-data
-      const formData = new FormData();
-      formData.append('magnet', magnetLink);
-      
-      try {
-        const response = await this.client.post('/api/torrents/checkcached', formData, {
-          headers: formData.getHeaders()
-        });
-        logger.debug(`Torbox: Checked cache, response:`, response.data);
-        return response.data;
-      } catch (postErr) {
-        // If POST fails, try GET with query parameter
-        try {
-          const response = await this.client.get('/api/torrents/checkcached', {
-            params: { magnet: magnetLink }
-          });
-          logger.debug(`Torbox: Checked cache (GET), response:`, response.data);
-          return response.data;
-        } catch (getErr) {
-          logger.error(`Torbox: Error checking cache:`, postErr.response?.data || postErr.message);
-          return null;
-        }
-      }
+      const response = await this.client.get('/api/torrents/mylist');
+      const torrents = response.data?.data || response.data?.torrents || response.data || [];
+      return Array.isArray(torrents) ? torrents : [];
     } catch (error) {
-      logger.error(`Torbox: Error checking cache:`, error.response?.data || error.message);
+      logger.error(`Torbox: Error getting my torrents:`, error.response?.data || error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Check if magnet is already cached in Torbox by checking mylist (most reliable method)
+   * According to Torbox API docs: GET /api/torrents/mylist returns is_cached field for each torrent
+   * @param {string} magnetLink - Magnet link to check
+   * @param {Array} torrentList - Optional: pre-fetched torrent list to avoid multiple API calls
+   * @returns {Promise<Object|null>} - Returns cache status with torrent info or null on failure
+   */
+  async checkCached(magnetLink, torrentList = null) {
+    try {
+      // Extract infoHash from magnet link
+      const infoHash = this.extractInfoHash(magnetLink);
+      if (!infoHash) {
+        logger.debug(`Torbox: Could not extract infoHash from magnet link`);
+        return null;
+      }
+
+      // Use provided list or fetch mylist
+      let torrents = torrentList;
+      if (!torrents) {
+        torrents = await this.getMyTorrents();
+      }
+      
+      // Find torrent by hash (check multiple hash field names)
+      const torrent = torrents.find(t => {
+        const torrentHash = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
+        return torrentHash === infoHash;
+      });
+
+      if (torrent) {
+        // Check is_cached field directly (from API docs)
+        // Also check if hls_url or stream_url exists - that means it's ready to stream
+        // Also check status - if status is 'completed' or 'ready', it might be cached
+        const hasStreamUrl = !!(torrent.hls_url || torrent.stream_url);
+        const status = (torrent.status || torrent.state || '').toLowerCase();
+        const isCompleted = status === 'completed' || status === 'ready' || status === 'cached' || status === 'downloaded';
+        
+        const isCached = torrent.is_cached === true || 
+                        torrent.is_cached === 1 || 
+                        torrent.cached === true ||
+                        torrent.cached === 1 ||
+                        (hasStreamUrl && isCompleted);
+        
+        if (isCached) {
+          logger.debug(`Torbox: Found CACHED torrent in mylist (hash: ${infoHash.substring(0, 8)}...), is_cached: ${torrent.is_cached}, hasStreamUrl: ${hasStreamUrl}, status: ${status}`);
+        } else {
+          logger.debug(`Torbox: Found torrent in mylist (hash: ${infoHash.substring(0, 8)}...), is_cached: ${torrent.is_cached}, hasStreamUrl: ${hasStreamUrl}, status: ${status}`);
+        }
+        
+        return {
+          cached: isCached,
+          data: {
+            torrent_id: torrent.torrent_id || torrent.id,
+            hash: torrent.hash || torrent.info_hash || torrent.infoHash,
+            is_cached: torrent.is_cached,
+            cached: torrent.cached,
+            status: torrent.status || torrent.state,
+            hls_url: torrent.hls_url,
+            stream_url: torrent.stream_url
+          },
+          detail: isCached ? 'Found cached torrent in mylist' : 'Torrent found but not cached'
+        };
+      }
+      
+      logger.debug(`Torbox: Torrent not found in mylist (hash: ${infoHash.substring(0, 8)}...)`);
+      return null;
+    } catch (error) {
+      logger.error(`Torbox: Error checking cache via mylist:`, error.response?.data || error.message);
       return null;
     }
   }
@@ -305,11 +365,49 @@ class TorboxClient {
   /**
    * Convert magnet link to streaming URL (complete flow)
    * @param {string} magnetLink - Magnet link to convert
+   * @param {Array} torrentList - Optional: pre-fetched torrent list to check for cached torrents
    * @returns {Promise<{streamingUrl: string|null, isCached: boolean}>} - Returns streaming URL and cache status
    */
-  async convertMagnetToStreamingUrl(magnetLink) {
+  async convertMagnetToStreamingUrl(magnetLink, torrentList = null) {
     try {
-      // Add magnet to Torbox first
+      // First, check if torrent is already in mylist and has streaming URLs
+      const infoHash = this.extractInfoHash(magnetLink);
+      if (infoHash) {
+        let torrents = torrentList;
+        if (!torrents) {
+          torrents = await this.getMyTorrents();
+        }
+        
+        const torrent = torrents.find(t => {
+          const torrentHash = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
+          return torrentHash === infoHash;
+        });
+
+        if (torrent) {
+          // Torrent is in mylist - check if it has streaming URLs
+          if (torrent.hls_url || torrent.stream_url) {
+            // Has streaming URLs - use them directly!
+            const streamingUrl = torrent.hls_url || torrent.stream_url;
+            const isCached = torrent.is_cached === true || torrent.is_cached === 1 || torrent.cached === true;
+            
+            logger.debug(`Torbox: Found torrent in mylist with streaming URL (hash: ${infoHash.substring(0, 8)}...), using: ${streamingUrl.substring(0, 50)}...`);
+            return { streamingUrl, isCached: isCached || true }; // Mark as cached if it has streaming URL
+          }
+          
+          // Torrent is in mylist but no streaming URL - try to get it using torrent_id
+          const torrentId = torrent.torrent_id || torrent.id;
+          if (torrentId) {
+            logger.debug(`Torbox: Found torrent in mylist (hash: ${infoHash.substring(0, 8)}...), getting streaming URL for torrent_id: ${torrentId}`);
+            const streamingUrl = await this.getStreamingUrl(torrentId);
+            if (streamingUrl) {
+              const isCached = torrent.is_cached === true || torrent.is_cached === 1 || torrent.cached === true;
+              return { streamingUrl, isCached: isCached || true };
+            }
+          }
+        }
+      }
+
+      // Not found in mylist or couldn't get URL from mylist - try adding magnet
       const addResult = await this.addMagnet(magnetLink);
       if (!addResult) {
         logger.error(`Torbox: Failed to add magnet`);
@@ -348,33 +446,6 @@ class TorboxClient {
         const streamingUrl = await this.getStreamingUrl(torrentId);
         if (streamingUrl) {
           return { streamingUrl, isCached: true };
-        }
-        
-        // Last resort: The constructed URL format might be wrong
-        // Based on Torbox API, the streaming URL might need to be accessed differently
-        // Let's try using torrent_id in the URL path instead of hash
-        const hash = addResult.data?.hash || addResult.hash;
-        
-        // Last resort: Construct URL - but this format might be wrong
-        // The Torbox API endpoints are all failing, so we're guessing the URL format
-        // TODO: Verify the correct Torbox streaming URL format from their API docs
-        if (torrentId) {
-          // Try different URL formats that might work
-          // Option 1: /v1/stream/{torrent_id}
-          // Option 2: /v1/torrents/{torrent_id}/stream
-          // Option 3: /v1/torrents/{torrent_id}/download
-          const constructedUrl = `${this.apiUrl}/v1/stream/${torrentId}`;
-          logger.debug(`Torbox: Trying constructed URL with torrent_id:`, constructedUrl);
-          logger.warn(`Torbox: All API endpoints failed. Using constructed URL format: ${constructedUrl}`);
-          logger.warn(`Torbox: This URL may not work. Please verify the correct Torbox streaming URL format.`);
-          return { streamingUrl: constructedUrl, isCached: true };
-        } else if (hash) {
-          // Fallback to hash if torrent_id not available
-          const constructedUrl = `${this.apiUrl}/v1/stream/${hash}`;
-          logger.debug(`Torbox: Trying constructed URL with hash:`, constructedUrl);
-          logger.warn(`Torbox: All API endpoints failed. Using constructed URL format: ${constructedUrl}`);
-          logger.warn(`Torbox: This URL may not work. Please verify the correct Torbox streaming URL format.`);
-          return { streamingUrl: constructedUrl, isCached: true };
         }
         
         return { streamingUrl: null, isCached: true };

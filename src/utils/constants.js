@@ -43,6 +43,13 @@ module.exports = {
   
   TORBOX_API_URL: 'https://api.torbox.app',
   TORBOX_TIMEOUT: 30000, // 30 seconds
-  TORBOX_POLL_INTERVAL: 2000 // 2 seconds
+  TORBOX_POLL_INTERVAL: 2000, // 2 seconds
+  
+  // TMDB API Configuration
+  // Bun automatically loads .env files, so process.env should have it
+  TMDB_API_KEY: process.env.TMDB_API_KEY || null,
+  TMDB_API_URL: 'https://api.themoviedb.org/3',
+  TMDB_POSTER_BASE_URL: 'https://image.tmdb.org/t/p',
+  TMDB_RATE_LIMIT_DELAY: 250 // ms between requests (40 requests per 10 seconds)
 };
 

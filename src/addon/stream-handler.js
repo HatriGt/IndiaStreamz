@@ -135,6 +135,15 @@ async function convertStreams(cachedStreams, torbox) {
   // Get API key for proxyHeaders (needed for authenticated streaming URLs)
   const apiKey = torbox.apiKey;
   
+  // Fetch mylist FIRST before processing streams (needed for both conversion and cache checking)
+  let myTorrents = null;
+  try {
+    myTorrents = await torbox.getMyTorrents();
+    logger.debug(`Fetched ${myTorrents.length} torrents from mylist for conversion and cache checking`);
+  } catch (error) {
+    logger.debug(`Failed to fetch mylist, will check individually: ${error.message}`);
+  }
+  
   // Process all streams in parallel for much faster response time
   const conversionPromises = streamsToConvert.map(async (stream) => {
     try {
@@ -148,8 +157,8 @@ async function convertStreams(cachedStreams, torbox) {
 
       logger.debug(`Converting magnet to streaming URL: ${magnetLink.substring(0, 50)}...`);
       
-      // Convert magnet to streaming URL (this also checks cache status)
-      const result = await torbox.convertMagnetToStreamingUrl(magnetLink);
+      // Convert magnet to streaming URL (pass mylist to check for cached torrents first)
+      const result = await torbox.convertMagnetToStreamingUrl(magnetLink, myTorrents);
       const { streamingUrl, isCached } = result || { streamingUrl: null, isCached: false };
       
       // Format stream name with emojis and green checkmark
@@ -252,6 +261,7 @@ async function convertStreams(cachedStreams, torbox) {
   });
   
   // Check cache status for remaining streams in parallel (but don't convert)
+  // Note: myTorrents was already fetched above
   const cacheCheckPromises = remainingStreams.map(async (stream) => {
     let streamName = stream.name;
     let isCached = false;
@@ -259,13 +269,19 @@ async function convertStreams(cachedStreams, torbox) {
     // Check if cached (quick check without conversion)
     if (stream.externalUrl && stream.externalUrl.startsWith('magnet:')) {
       try {
-        const cached = await torbox.checkCached(stream.externalUrl);
+        // Pass pre-fetched torrent list to avoid multiple API calls
+        const cached = await torbox.checkCached(stream.externalUrl, myTorrents);
+        // Check is_cached field directly from mylist response (most reliable)
         isCached = cached && (
-          cached.cached || 
-          cached.data?.cached ||
-          (cached.data && Object.keys(cached.data).length > 0 && cached.data.torrent_id) ||
-          (cached.detail && cached.detail.includes('cached'))
+          cached.cached === true ||
+          cached.data?.is_cached === true ||
+          cached.data?.is_cached === 1 ||
+          cached.data?.cached === true
         );
+        
+        if (isCached) {
+          logger.debug(`Stream is cached: ${streamName.substring(0, 50)}...`);
+        }
       } catch (error) {
         // Ignore cache check errors for non-converted streams
         logger.debug(`Cache check failed for remaining stream: ${error.message}`);

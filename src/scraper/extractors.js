@@ -381,7 +381,7 @@ function structureEpisodeStreamsForStremio(magnetLinks, magnetDescriptions = [],
 }
 
 /**
- * Clean title for display - extracts just the movie/series name
+ * Clean title for display - extracts just the movie/series name (no year, no language)
  */
 function cleanTitleForDisplay(title) {
   if (!title) return '';
@@ -399,26 +399,80 @@ function cleanTitleForDisplay(title) {
     .replace(/\s+/g, ' ')
     .trim();
   
-  // Extract year if present and keep it
-  const yearMatch = cleaned.match(/\b(19|20)\d{2}\b/);
-  const year = yearMatch ? yearMatch[0] : null;
-  
-  // Remove year temporarily to clean the name
+  // Remove year completely (no extraction, no re-addition)
   let nameOnly = cleaned.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
+  nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();
   
-  // Remove language names from the end
+  // Remove language names (check anywhere in title, not just end)
   const languages = ['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English', 'TAM', 'TEL', 'HIN', 'MAL', 'KAN', 'ENG'];
   for (const lang of languages) {
-    const regex = new RegExp(`\\s+${lang}\\s*$`, 'i');
-    nameOnly = nameOnly.replace(regex, '').trim();
+    // Remove from end
+    const regexEnd = new RegExp(`\\s+${lang}\\s*$`, 'i');
+    nameOnly = nameOnly.replace(regexEnd, '').trim();
+    // Remove from beginning
+    const regexStart = new RegExp(`^${lang}\\s+`, 'i');
+    nameOnly = nameOnly.replace(regexStart, '').trim();
+    // Remove standalone (with word boundaries)
+    const regexStandalone = new RegExp(`\\b${lang}\\b`, 'gi');
+    nameOnly = nameOnly.replace(regexStandalone, '').trim();
   }
   
-  // Add year back if it was there
-  if (year && !nameOnly.includes(year)) {
-    nameOnly = `${nameOnly} (${year})`;
-  }
+  // Clean up multiple spaces and dashes
+  nameOnly = nameOnly.replace(/\s+/g, ' ').replace(/\s*-\s*-\s*/g, ' ').trim();
   
   return nameOnly || cleaned; // Fallback to cleaned if empty
+}
+
+/**
+ * Clean title for TMDB search - removes technical terms but keeps year for better matching
+ * @param {string} title - Original title
+ * @returns {Object} - { cleanTitle: string, year: number | null }
+ */
+function cleanTitleForTMDB(title) {
+  if (!title) return { cleanTitle: '', year: null };
+  
+  // Extract year first (before cleaning)
+  const yearMatch = title.match(/\b(19|20)\d{2}\b/);
+  const year = yearMatch ? parseInt(yearMatch[0]) : null;
+  
+  // Remove common technical suffixes and patterns
+  let cleaned = title
+    .trim()
+    .replace(/\s+/g, ' ')
+    // Remove quality indicators
+    .replace(/\s*-\s*\[.*?\]/g, '') // Remove [1080p & 720p...]
+    .replace(/\s*-\s*\(.*?\)/g, '') // Remove (DD+5.1...)
+    // Remove common technical terms
+    .replace(/\s*(TRUE|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|HC-ESub|Org Auds|Original Audios|HQ Clean Audio|HQ Clean Audios)\s*/gi, ' ')
+    .replace(/\s*-\s*-\s*/g, ' ') // Remove multiple dashes
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Remove year from title (we'll use it separately for search)
+  let nameOnly = cleaned.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
+  nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();
+  
+  // Remove language names (check anywhere in title)
+  const languages = ['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English', 'TAM', 'TEL', 'HIN', 'MAL', 'KAN', 'ENG'];
+  for (const lang of languages) {
+    // Remove from end
+    const regexEnd = new RegExp(`\\s+${lang}\\s*$`, 'i');
+    nameOnly = nameOnly.replace(regexEnd, '').trim();
+    // Remove from beginning
+    const regexStart = new RegExp(`^${lang}\\s+`, 'i');
+    nameOnly = nameOnly.replace(regexStart, '').trim();
+    // Remove standalone (with word boundaries)
+    const regexStandalone = new RegExp(`\\b${lang}\\b`, 'gi');
+    nameOnly = nameOnly.replace(regexStandalone, '').trim();
+  }
+  
+  // Clean up multiple spaces and dashes
+  nameOnly = nameOnly.replace(/\s+/g, ' ').replace(/\s*-\s*-\s*/g, ' ').trim();
+  
+  return {
+    cleanTitle: nameOnly || cleaned,
+    year: year
+  };
 }
 
 /**
@@ -475,6 +529,7 @@ module.exports = {
   structureStreamsForStremio,
   structureEpisodeStreamsForStremio,
   cleanTitleForDisplay,
+  cleanTitleForTMDB,
   normalizeTitle,
   extractYear,
   parseQuality,
