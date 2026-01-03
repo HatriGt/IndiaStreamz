@@ -121,15 +121,48 @@ class TamilMVScraper {
       return result;
     }
 
+    // Import fileCache for checking existing movies/series
+    const fileCache = require('../cache/file-cache');
+
     // Step 3: Process each content item
     const limit = Math.min(listings.length, 20); // Limit to first 20 for faster testing
     let processed = 0;
     let skipped = 0;
+    let skippedCached = 0;
 
     for (let i = 0; i < limit; i++) {
       try {
         const listing = listings[i];
         logger.debug(`Processing ${i + 1}/${limit}: ${listing.title.substring(0, 50)}...`);
+        
+        // Pre-check: Try to detect if this content is already cached
+        // Detect languages and series info from listing title
+        const preDetectedLanguages = detectLanguagesFromTitle(listing.title);
+        const preSeriesInfo = detectSeriesFromTitle(listing.title);
+        
+        let alreadyCached = false;
+        if (preDetectedLanguages.length > 0) {
+          if (preSeriesInfo.isSeries) {
+            // Check if series exists in cache
+            const potentialSeriesId = generateSeriesId(listing.title, preSeriesInfo.season, preDetectedLanguages);
+            alreadyCached = await fileCache.hasMovie(potentialSeriesId); // Series are stored in moviesDir
+            if (alreadyCached) {
+              logger.debug(`Skipping cached series: ${listing.title.substring(0, 50)}... (ID: ${potentialSeriesId})`);
+            }
+          } else {
+            // Check if movie exists in cache
+            const potentialMovieId = generateMovieId(listing.title, preDetectedLanguages);
+            alreadyCached = await fileCache.hasMovie(potentialMovieId);
+            if (alreadyCached) {
+              logger.debug(`Skipping cached movie: ${listing.title.substring(0, 50)}... (ID: ${potentialMovieId})`);
+            }
+          }
+        }
+        
+        if (alreadyCached) {
+          skippedCached++;
+          continue; // Skip scraping this content
+        }
         
         const contentData = await this.scrapeContentDetails(listing.url, listing.title);
         
@@ -160,6 +193,14 @@ class TamilMVScraper {
         if (seriesInfo.isSeries) {
           // Handle series
           const seriesId = generateSeriesId(contentData.title, seriesInfo.season, detectedLanguages);
+          
+          // Double-check: Make sure it's not already in cache (in case ID generation differs)
+          if (await fileCache.hasMovie(seriesId)) {
+            logger.debug(`Skipping cached series (double-check): ${contentData.title} (ID: ${seriesId})`);
+            skippedCached++;
+            continue;
+          }
+          
           contentData.id = seriesId;
           contentData.season = seriesInfo.season;
           contentData.episodes = seriesInfo.episodes;
@@ -187,6 +228,14 @@ class TamilMVScraper {
         } else {
           // Handle movie
           const movieId = generateMovieId(contentData.title, detectedLanguages);
+          
+          // Double-check: Make sure it's not already in cache (in case ID generation differs)
+          if (await fileCache.hasMovie(movieId)) {
+            logger.debug(`Skipping cached movie (double-check): ${contentData.title} (ID: ${movieId})`);
+            skippedCached++;
+            continue;
+          }
+          
           contentData.id = movieId;
           contentData.languages = detectedLanguages;
           contentData.type = 'movie';
@@ -218,7 +267,7 @@ class TamilMVScraper {
       }
     }
 
-    logger.success(`Phase 1 completed: ${processed} processed, ${skipped} skipped`);
+    logger.success(`Phase 1 completed: ${processed} processed, ${skipped} skipped, ${skippedCached} skipped (already cached)`);
     logger.info(`Movies: ${Object.keys(result.movies).length}, Series: ${Object.keys(result.series).length}`);
     
     // Phase 2: Batch TMDB Enrichment
@@ -236,7 +285,7 @@ class TamilMVScraper {
       }
     }
 
-    logger.success(`Scrape completed: ${processed} processed, ${skipped} skipped`);
+    logger.success(`Scrape completed: ${processed} processed, ${skipped} skipped, ${skippedCached} skipped (already cached)`);
     return result;
   }
 
@@ -429,6 +478,18 @@ class TamilMVScraper {
       
       if (!normalizedTitle) {
         logger.warn(`Could not extract title from: ${contentUrl}`);
+        return null;
+      }
+      
+      // Skip trailers, teasers, and promos
+      const titleLower = normalizedTitle.toLowerCase();
+      if (titleLower.includes('trailer') || 
+          titleLower.includes('teaser') || 
+          titleLower.includes('promo') ||
+          titleLower.includes('teaser trailer') ||
+          titleLower.includes('official trailer') ||
+          titleLower.includes('trailer launch')) {
+        logger.debug(`Skipping trailer/teaser/promo: ${normalizedTitle}`);
         return null;
       }
       

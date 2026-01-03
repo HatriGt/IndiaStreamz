@@ -62,6 +62,17 @@ function parseMovieListings(html) {
     title = title.replace(/\s+/g, ' ').trim();
     title = title.replace(/^(Re:|RE:)\s*/i, '').trim();
     
+    // Skip trailers, teasers, and promos
+    const titleLower = title.toLowerCase();
+    if (titleLower.includes('trailer') || 
+        titleLower.includes('teaser') || 
+        titleLower.includes('promo') ||
+        titleLower.includes('teaser trailer') ||
+        titleLower.includes('official trailer') ||
+        titleLower.includes('trailer launch')) {
+      return; // Skip trailers
+    }
+    
     // Validate - must have title and valid URL
     // Accept titles as short as 10 chars (some quality-only links might be valid)
     if (href && title && title.length >= 10) {
@@ -118,6 +129,17 @@ function parseMovieListings(html) {
       
       // Clean up title
       title = title.replace(/\s+/g, ' ').trim();
+      
+      // Skip trailers, teasers, and promos
+      const titleLower = title.toLowerCase();
+      if (titleLower.includes('trailer') || 
+          titleLower.includes('teaser') || 
+          titleLower.includes('promo') ||
+          titleLower.includes('teaser trailer') ||
+          titleLower.includes('official trailer') ||
+          titleLower.includes('trailer launch')) {
+        return; // Skip trailers
+      }
       
       // Validate URL - must be a proper topic URL, not ending in -0/
       if (href && title && title.length > 5) {
