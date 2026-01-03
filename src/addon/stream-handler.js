@@ -103,9 +103,30 @@ async function handleStream({ type, id, extra }) {
  * @param {TorboxClient} torbox - Torbox client instance
  * @returns {Promise<Array>} - Array of stream objects with direct URLs or fallback to infoHash
  */
-async function convertStreams(cachedStreams, torbox) {
-  const convertedStreams = [];
+/**
+ * Format stream name with emojis and green checkmark for cached streams
+ */
+function formatStreamNameWithEmoji(streamName, isCached) {
+  // Add quality emojis based on stream name
+  let emoji = '🎬'; // Default movie emoji
   
+  if (streamName.includes('4K') || streamName.includes('2160p')) {
+    emoji = '🎥'; // 4K quality
+  } else if (streamName.includes('1080p')) {
+    emoji = '📹'; // 1080p quality
+  } else if (streamName.includes('720p')) {
+    emoji = '📺'; // 720p quality
+  } else if (streamName.includes('480p') || streamName.includes('360p')) {
+    emoji = '📱'; // Lower quality
+  }
+  
+  // Add green checkmark if cached
+  const cachedIndicator = isCached ? '✅ ' : '';
+  
+  return `${cachedIndicator}${emoji} ${streamName}`;
+}
+
+async function convertStreams(cachedStreams, torbox) {
   // Limit to first 5 streams to avoid rate limiting
   // User can still see all streams, but only top 5 will be converted
   const streamsToConvert = cachedStreams.slice(0, 5);
@@ -114,22 +135,15 @@ async function convertStreams(cachedStreams, torbox) {
   // Get API key for proxyHeaders (needed for authenticated streaming URLs)
   const apiKey = torbox.apiKey;
   
-  for (let i = 0; i < streamsToConvert.length; i++) {
-    const stream = streamsToConvert[i];
-    
-    // Add delay between requests to avoid rate limiting (except for first one)
-    if (i > 0) {
-      await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
-    }
-    
+  // Process all streams in parallel for much faster response time
+  const conversionPromises = streamsToConvert.map(async (stream) => {
     try {
       // Get magnet link from externalUrl
       const magnetLink = stream.externalUrl;
       
       if (!magnetLink || !magnetLink.startsWith('magnet:')) {
         // No magnet link, keep original stream
-        convertedStreams.push({ ...stream, isCached: false });
-        continue;
+        return { ...stream, isCached: false };
       }
 
       logger.debug(`Converting magnet to streaming URL: ${magnetLink.substring(0, 50)}...`);
@@ -138,11 +152,8 @@ async function convertStreams(cachedStreams, torbox) {
       const result = await torbox.convertMagnetToStreamingUrl(magnetLink);
       const { streamingUrl, isCached } = result || { streamingUrl: null, isCached: false };
       
-      // Add checkmark indicator if cached
-      let streamName = stream.name;
-      if (isCached) {
-        streamName = `✓ ${streamName}`;
-      }
+      // Format stream name with emojis and green checkmark
+      const streamName = formatStreamNameWithEmoji(stream.name, isCached);
       
       if (streamingUrl) {
         // Check if URL is a direct video file (MP4, MKV, etc.) or a streaming endpoint
@@ -157,7 +168,8 @@ async function convertStreams(cachedStreams, torbox) {
         if (isStreamingEndpoint && !isDirectVideoFile) {
           // This is a streaming endpoint that likely needs authentication
           // Use proxyHeaders to pass the Bearer token
-          convertedStreams.push({
+          logger.debug(`Successfully converted to streaming URL with auth headers: ${streamingUrl.substring(0, 50)}...`);
+          return {
             name: streamName,
             url: streamingUrl,
             isCached,
@@ -170,11 +182,11 @@ async function convertStreams(cachedStreams, torbox) {
                 }
               }
             }
-          });
-          logger.debug(`Successfully converted to streaming URL with auth headers: ${streamingUrl.substring(0, 50)}...`);
+          };
         } else if (isDirectVideoFile) {
           // Direct video file - web ready
-          convertedStreams.push({
+          logger.debug(`Successfully converted to direct video URL: ${streamingUrl.substring(0, 50)}...`);
+          return {
             name: streamName,
             url: streamingUrl,
             isCached,
@@ -182,11 +194,11 @@ async function convertStreams(cachedStreams, torbox) {
               notWebReady: false, // Direct MP4 over HTTPS
               bingeGroup: stream.behaviorHints?.bingeGroup
             }
-          });
-          logger.debug(`Successfully converted to direct video URL: ${streamingUrl.substring(0, 50)}...`);
+          };
         } else {
           // Unknown format - assume not web ready
-          convertedStreams.push({
+          logger.debug(`Successfully converted to streaming URL (unknown format): ${streamingUrl.substring(0, 50)}...`);
+          return {
             name: streamName,
             url: streamingUrl,
             isCached,
@@ -194,36 +206,53 @@ async function convertStreams(cachedStreams, torbox) {
               notWebReady: true,
               bingeGroup: stream.behaviorHints?.bingeGroup
             }
-          });
-          logger.debug(`Successfully converted to streaming URL (unknown format): ${streamingUrl.substring(0, 50)}...`);
+          };
         }
       } else {
         // Failed: fallback to infoHash (desktop only)
         logger.warn(`Failed to convert magnet, falling back to infoHash`);
-        convertedStreams.push({
+        return {
           name: streamName,
           infoHash: stream.infoHash,
           externalUrl: magnetLink,
           isCached,
           behaviorHints: stream.behaviorHints
-        });
+        };
       }
     } catch (error) {
       // Error converting: fallback to infoHash
       logger.error(`Error converting stream:`, error.message);
-      convertedStreams.push({
-        name: stream.name,
+      return {
+        name: formatStreamNameWithEmoji(stream.name, false),
         infoHash: stream.infoHash,
         externalUrl: stream.externalUrl,
         isCached: false,
         behaviorHints: stream.behaviorHints
-      });
+      };
     }
-  }
+  });
   
-  // Add remaining streams as-is (with infoHash for desktop)
-  // Check cache status for remaining streams too (but don't convert)
-  for (const stream of remainingStreams) {
+  // Wait for all conversions in parallel
+  const convertedResults = await Promise.allSettled(conversionPromises);
+  const convertedStreams = convertedResults.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    } else {
+      // If promise failed, return original stream with formatted name
+      const stream = streamsToConvert[index];
+      logger.error(`Stream conversion failed:`, result.reason);
+      return {
+        name: formatStreamNameWithEmoji(stream.name, false),
+        infoHash: stream.infoHash,
+        externalUrl: stream.externalUrl,
+        isCached: false,
+        behaviorHints: stream.behaviorHints
+      };
+    }
+  });
+  
+  // Check cache status for remaining streams in parallel (but don't convert)
+  const cacheCheckPromises = remainingStreams.map(async (stream) => {
     let streamName = stream.name;
     let isCached = false;
     
@@ -237,31 +266,47 @@ async function convertStreams(cachedStreams, torbox) {
           (cached.data && Object.keys(cached.data).length > 0 && cached.data.torrent_id) ||
           (cached.detail && cached.detail.includes('cached'))
         );
-        if (isCached) {
-          streamName = `✓ ${streamName}`;
-        }
       } catch (error) {
         // Ignore cache check errors for non-converted streams
         logger.debug(`Cache check failed for remaining stream: ${error.message}`);
       }
     }
     
-    convertedStreams.push({
+    return {
       ...stream,
-      name: streamName,
+      name: formatStreamNameWithEmoji(streamName, isCached),
       isCached
-    });
-  }
+    };
+  });
+  
+  // Wait for all cache checks in parallel
+  const remainingResults = await Promise.allSettled(cacheCheckPromises);
+  const remainingConverted = remainingResults.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    } else {
+      // If cache check failed, return original stream
+      const stream = remainingStreams[index];
+      return {
+        ...stream,
+        name: formatStreamNameWithEmoji(stream.name, false),
+        isCached: false
+      };
+    }
+  });
+  
+  // Combine all streams
+  const allStreams = [...convertedStreams, ...remainingConverted];
   
   // Sort streams: cached first, then non-cached
-  convertedStreams.sort((a, b) => {
+  allStreams.sort((a, b) => {
     const aCached = a.isCached ? 1 : 0;
     const bCached = b.isCached ? 1 : 0;
     return bCached - aCached; // Cached first (1 - 0 = 1, 0 - 1 = -1)
   });
   
   // Remove isCached property before returning (not part of Stremio stream format)
-  return convertedStreams.map(({ isCached, ...stream }) => stream);
+  return allStreams.map(({ isCached, ...stream }) => stream);
 }
 
 // Export handler as default, and utility functions as properties
