@@ -48,13 +48,15 @@ function extractInfoHash(magnetLink) {
  * Structure movie data for Stremio catalog format
  */
 function structureMovieForCatalog(movieData) {
-  // Use cleaned title for display name
-  const displayName = cleanTitleForDisplay(movieData.title);
+  // Prioritize TMDB title if available, else use scraped title
+  // Priority: tmdbTitle > title (scraped) > name (from meta) > id
+  const title = movieData.tmdbTitle || movieData.title || movieData.name || '';
+  const displayName = title ? (movieData.tmdbTitle ? title : cleanTitleForDisplay(title)) : '';
   
   return {
     id: movieData.id,
     type: 'movie',
-    name: displayName, // Clean name for display
+    name: displayName || movieData.id, // Fallback to ID if name is empty
     poster: movieData.poster || null,
     description: movieData.description || `${displayName} - ${movieData.languages ? movieData.languages.join(', ') : ''}`,
     genres: movieData.genres || [],
@@ -72,26 +74,38 @@ function structureMovieForCatalog(movieData) {
  * Structure movie metadata for Stremio meta format
  */
 function structureMovieForMeta(movieData) {
-  // Use cleaned title for display name
-  const displayName = cleanTitleForDisplay(movieData.title);
+  // Prioritize TMDB title if available, else use scraped title
+  // Priority: tmdbTitle > title (scraped) > name (from meta)
+  const title = movieData.tmdbTitle || movieData.title || movieData.name || '';
+  const displayName = title ? (movieData.tmdbTitle ? title : cleanTitleForDisplay(title)) : '';
   
   return {
     id: movieData.id,
     type: 'movie',
-    name: displayName, // Clean name for display
+    name: displayName || movieData.id, // Fallback to ID if name is empty
     poster: movieData.poster || null,
     posterShape: 'regular',
     background: movieData.background || null,
     logo: movieData.logo || null,
     description: movieData.description || `${displayName} - ${movieData.languages ? movieData.languages.join(', ') : ''}`,
     releaseInfo: movieData.releaseInfo || null,
+    released: movieData.released || null, // ISO 8601 date
     imdbRating: movieData.imdbRating || null,
     genres: movieData.genres || [],
     director: movieData.director || [],
+    writer: movieData.writer || [],
     cast: movieData.cast || [],
     runtime: movieData.runtime || null,
     language: movieData.languages ? movieData.languages.join(', ') : null,
-    website: movieData.url || null
+    originalLanguage: movieData.originalLanguage || null,
+    country: movieData.country || null,
+    tagline: movieData.tagline || null,
+    trailers: movieData.trailers || null,
+    popularity: movieData.popularity || null,
+    voteCount: movieData.voteCount || null,
+    productionCompanies: movieData.productionCompanies || null,
+    spokenLanguages: movieData.spokenLanguages || null,
+    website: movieData.url || movieData.website || null
   };
 }
 
@@ -301,13 +315,15 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
  * Structure series data for Stremio catalog format
  */
 function structureSeriesForCatalog(seriesData) {
-  // Use cleaned title for display name
-  const displayName = cleanTitleForDisplay(seriesData.title);
+  // Prioritize TMDB name if available (TMDB uses 'name' for TV shows), else use scraped title
+  // Priority: tmdbName > name (from meta) > title (scraped) > id
+  const title = seriesData.tmdbName || seriesData.name || seriesData.title || '';
+  const displayName = title ? (seriesData.tmdbName ? title : cleanTitleForDisplay(title)) : '';
   
   return {
     id: seriesData.id,
     type: 'series',
-    name: displayName, // Clean name for display
+    name: displayName || seriesData.id, // Fallback to ID if name is empty
     poster: seriesData.poster || null,
     description: seriesData.description || `${displayName} - Season ${seriesData.season} (${seriesData.languages ? seriesData.languages.join(', ') : ''})`,
     genres: seriesData.genres || [],
@@ -343,26 +359,38 @@ function structureSeriesForMeta(seriesData) {
     });
   }
   
-  // Use cleaned title for display name
-  const displayName = cleanTitleForDisplay(seriesData.title);
+  // Prioritize TMDB name if available (TMDB uses 'name' for TV shows), else use scraped title
+  // Priority: tmdbName > name (from meta) > title (scraped) > id
+  const title = seriesData.tmdbName || seriesData.name || seriesData.title || '';
+  const displayName = title ? (seriesData.tmdbName ? title : cleanTitleForDisplay(title)) : '';
   
   return {
     id: seriesData.id,
     type: 'series',
-    name: displayName, // Clean name for display
+    name: displayName || seriesData.id, // Fallback to ID if name is empty
     poster: seriesData.poster || null,
     posterShape: 'regular',
     background: seriesData.background || null,
     logo: seriesData.logo || null,
     description: seriesData.description || `${displayName} - Season ${seriesData.season} (${seriesData.languages ? seriesData.languages.join(', ') : ''})`,
     releaseInfo: seriesData.releaseInfo || null,
+    released: seriesData.released || null, // ISO 8601 date
     imdbRating: seriesData.imdbRating || null,
     genres: seriesData.genres || [],
     director: seriesData.director || [],
+    writer: seriesData.writer || [],
     cast: seriesData.cast || [],
     runtime: seriesData.runtime || null,
     language: seriesData.languages ? seriesData.languages.join(', ') : null,
-    website: seriesData.url || null,
+    originalLanguage: seriesData.originalLanguage || null,
+    country: seriesData.country || null,
+    tagline: seriesData.tagline || null,
+    trailers: seriesData.trailers || null,
+    popularity: seriesData.popularity || null,
+    voteCount: seriesData.voteCount || null,
+    productionCompanies: seriesData.productionCompanies || null,
+    spokenLanguages: seriesData.spokenLanguages || null,
+    website: seriesData.url || seriesData.website || null,
     seasons: seasons
   };
 }
@@ -419,6 +447,9 @@ function cleanTitleForDisplay(title) {
   
   // Clean up multiple spaces and dashes
   nameOnly = nameOnly.replace(/\s+/g, ' ').replace(/\s*-\s*-\s*/g, ' ').trim();
+  
+  // Remove trailing dashes and spaces
+  nameOnly = nameOnly.replace(/[-\s]+$/, '').trim();
   
   return nameOnly || cleaned; // Fallback to cleaned if empty
 }

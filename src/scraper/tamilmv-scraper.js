@@ -419,7 +419,20 @@ class TamilMVScraper {
                 director: tmdbMetadata.director.length > 0 ? tmdbMetadata.director : movieData.director,
                 runtime: tmdbMetadata.runtime || movieData.runtime,
                 releaseInfo: tmdbMetadata.releaseInfo || movieData.releaseInfo,
-                tmdbId: tmdbMetadata.tmdbId
+                tmdbId: tmdbMetadata.tmdbId,
+                tmdbTitle: tmdbMetadata.tmdbTitle || null, // Store TMDB title for prioritization
+                // New enriched fields
+                released: tmdbMetadata.released || movieData.released,
+                tagline: tmdbMetadata.tagline || movieData.tagline,
+                country: tmdbMetadata.country || movieData.country,
+                writer: tmdbMetadata.writer || movieData.writer,
+                trailers: tmdbMetadata.trailers || movieData.trailers,
+                popularity: tmdbMetadata.popularity || movieData.popularity,
+                voteCount: tmdbMetadata.voteCount || movieData.voteCount,
+                productionCompanies: tmdbMetadata.productionCompanies || movieData.productionCompanies,
+                spokenLanguages: tmdbMetadata.spokenLanguages || movieData.spokenLanguages,
+                originalLanguage: tmdbMetadata.originalLanguage || movieData.originalLanguage,
+                website: tmdbMetadata.website || movieData.website || movieData.url
               };
 
               enrichedMovies[movieId] = enriched;

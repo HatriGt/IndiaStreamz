@@ -61,8 +61,8 @@ class TMDBClient {
     }
 
     try {
-      // Fetch movie details and credits in parallel
-      const [movieResponse, creditsResponse] = await Promise.allSettled([
+      // Fetch movie details, credits, and videos in parallel
+      const [movieResponse, creditsResponse, videosResponse] = await Promise.allSettled([
         axios.get(`${this.baseUrl}/movie/${tmdbId}`, {
           params: {
             api_key: this.apiKey,
@@ -76,11 +76,19 @@ class TMDBClient {
             language: 'en-US'
           },
           timeout: 10000
+        }),
+        axios.get(`${this.baseUrl}/movie/${tmdbId}/videos`, {
+          params: {
+            api_key: this.apiKey,
+            language: 'en-US'
+          },
+          timeout: 10000
         })
       ]);
 
       const movieData = movieResponse.status === 'fulfilled' ? movieResponse.value.data : null;
       const creditsData = creditsResponse.status === 'fulfilled' ? creditsResponse.value.data : null;
+      const videosData = videosResponse.status === 'fulfilled' ? videosResponse.value.data : null;
 
       if (!movieData) {
         logger.error(`TMDB: Failed to fetch movie details for ID ${tmdbId}`);
@@ -91,6 +99,11 @@ class TMDBClient {
       if (creditsData) {
         movieData.cast = creditsData.cast || [];
         movieData.crew = creditsData.crew || [];
+      }
+
+      // Merge videos into movie data
+      if (videosData) {
+        movieData.videos = videosData.results || [];
       }
 
       return movieData;
@@ -251,16 +264,69 @@ class TMDBClient {
       .filter(person => person.job === 'Director')
       .map(person => person.name);
 
+    // Extract writers (Screenplay, Writer, Story)
+    const writers = (tmdbData.crew || [])
+      .filter(person => 
+        person.job === 'Writer' || 
+        person.job === 'Screenplay' || 
+        person.job === 'Story' ||
+        person.job === 'Novel' ||
+        person.job === 'Characters'
+      )
+      .map(person => person.name)
+      .filter((name, index, self) => self.indexOf(name) === index); // Remove duplicates
+
     // Extract genres
     const genres = (tmdbData.genres || [])
       .map(genre => genre.name);
 
-    // Format release date
+    // Format release date (year only for releaseInfo)
     const releaseInfo = tmdbData.release_date 
       ? new Date(tmdbData.release_date).getFullYear().toString()
       : null;
 
+    // Format release date (ISO 8601 for released field)
+    const released = tmdbData.release_date 
+      ? new Date(tmdbData.release_date).toISOString()
+      : null;
+
+    // Extract trailers from videos
+    // Handle both array format and object with results property
+    const videosArray = Array.isArray(tmdbData.videos) 
+      ? tmdbData.videos 
+      : (tmdbData.videos?.results || []);
+    
+    const trailers = videosArray
+      .filter(video => 
+        video && 
+        video.type === 'Trailer' && 
+        video.site === 'YouTube' && 
+        video.key
+      )
+      .map(video => ({
+        youtube: video.key, // Stremio expects 'youtube' field with video ID
+        thumbnail: `https://img.youtube.com/vi/${video.key}/maxresdefault.jpg`,
+        title: video.name || 'Trailer'
+      }))
+      .slice(0, 3); // Limit to 3 trailers
+
+    // Extract primary production country
+    const country = tmdbData.production_countries && tmdbData.production_countries.length > 0
+      ? tmdbData.production_countries[0].iso_3166_1
+      : null;
+
+    // Extract production companies
+    const productionCompanies = (tmdbData.production_companies || [])
+      .map(company => company.name)
+      .slice(0, 5); // Limit to 5 companies
+
+    // Extract spoken languages
+    const spokenLanguages = (tmdbData.spoken_languages || [])
+      .map(lang => lang.iso_639_1)
+      .filter((lang, index, self) => self.indexOf(lang) === index); // Remove duplicates
+
     return {
+      // Existing fields
       poster: this.formatPosterUrl(tmdbData.poster_path, 'w500'),
       background: this.formatBackdropUrl(tmdbData.backdrop_path, 'original'),
       genres: genres,
@@ -270,7 +336,22 @@ class TMDBClient {
       director: directors,
       runtime: tmdbData.runtime || null,
       releaseInfo: releaseInfo,
-      tmdbId: tmdbData.id
+      tmdbId: tmdbData.id,
+      tmdbTitle: tmdbData.title || null, // TMDB official title (prioritize this)
+      
+      // New fields from existing API response
+      released: released,
+      tagline: tmdbData.tagline || null,
+      country: country,
+      writer: writers,
+      popularity: tmdbData.popularity || null,
+      voteCount: tmdbData.vote_count || null,
+      productionCompanies: productionCompanies.length > 0 ? productionCompanies : null,
+      spokenLanguages: spokenLanguages.length > 0 ? spokenLanguages : null,
+      originalLanguage: tmdbData.original_language || null,
+      
+      // New fields from videos API
+      trailers: trailers.length > 0 ? trailers : null
     };
   }
 }
