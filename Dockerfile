@@ -22,9 +22,9 @@ EXPOSE 3005
 ENV PORT=3005
 ENV NODE_ENV=production
 
-# Health check
+# Health check - use /health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3005/manifest.json', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+  CMD node -e "require('http').get('http://localhost:3005/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the server
 CMD ["node", "src/server.js"]
