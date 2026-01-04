@@ -336,6 +336,15 @@ app.get('/test', (req, res) => {
   res.json({ message: 'Express routes are working!', routes: ['/configure', '/test'] });
 });
 
+// Health check endpoint (for Dokploy/reverse proxy)
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    port: constants.PORT 
+  });
+});
+
 // Call serveHTTP to mount Stremio addon routes on our Express app
 // Don't pass port - this only mounts routes, doesn't start a server
 serveHTTP(addonInterface, {
@@ -348,8 +357,10 @@ const server = http.createServer((req, res) => {
   app(req, res);
 });
 
-server.listen(constants.PORT, () => {
+// Bind to 0.0.0.0 to accept connections from outside the container
+server.listen(constants.PORT, '0.0.0.0', () => {
   logger.info(`Express HTTP server started on port ${constants.PORT}`);
+  logger.info(`Server listening on 0.0.0.0:${constants.PORT}`);
   logger.info(`Custom routes should now work: http://localhost:${constants.PORT}/configure`);
 });
 
