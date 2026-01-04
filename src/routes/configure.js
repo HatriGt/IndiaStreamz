@@ -4,7 +4,11 @@ const logger = require('../utils/logger');
 module.exports = (req, res) => {
   try {
     logger.info('[CONFIGURE] Route handler called');
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    // Helper to get base URL with HTTPS
+    const protocol = req.get('X-Forwarded-Proto') || req.protocol;
+    const secureProtocol = protocol === 'https' || req.secure ? 'https' : 'https';
+    const host = req.get('host') || req.get('X-Forwarded-Host') || 'localhost:3005';
+    const baseUrl = `${secureProtocol}://${host}`;
     
     const html = `<!DOCTYPE html>
 <html>

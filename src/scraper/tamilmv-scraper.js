@@ -125,7 +125,7 @@ class TamilMVScraper {
     const fileCache = require('../cache/file-cache');
 
     // Step 3: Process each content item
-    const limit = Math.min(listings.length, 20); // Limit to first 20 for faster testing
+    const limit = Math.min(listings.length, 250); // Limit to first 250 movies for caching
     let processed = 0;
     let skipped = 0;
     let skippedCached = 0;

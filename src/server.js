@@ -19,6 +19,22 @@ const tokenManager = require('./utils/token-manager');
 
 const app = express();
 
+// Trust proxy (for HTTPS detection behind reverse proxy)
+app.set('trust proxy', true);
+
+// Helper function to get base URL with HTTPS
+function getBaseUrl(req) {
+  // Check X-Forwarded-Proto header first (set by reverse proxy like Dokploy/Traefik)
+  const forwardedProto = req.get('X-Forwarded-Proto');
+  const protocol = forwardedProto || req.protocol;
+  // In production (behind reverse proxy), always use HTTPS
+  // Check if we're behind a proxy (has X-Forwarded-Proto) or in production
+  const isProduction = process.env.NODE_ENV === 'production' || forwardedProto;
+  const secureProtocol = (isProduction || protocol === 'https' || req.secure) ? 'https' : protocol;
+  const host = req.get('X-Forwarded-Host') || req.get('host') || 'localhost:3005';
+  return `${secureProtocol}://${host}`;
+}
+
 // Parse JSON bodies for API endpoints
 app.use(express.json());
 
@@ -63,11 +79,16 @@ app.get('/api/torbox-config', async (req, res) => {
   }
 });
 
+// Root route - redirect to configure page
+app.get('/', (req, res) => {
+  res.redirect('/configure');
+});
+
 // Configuration page endpoint (register before serveHTTP to ensure it's accessible)
 app.get('/configure', (req, res) => {
   try {
     logger.info('[CONFIGURE] Route handler called - page accessed');
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = getBaseUrl(req);
     
     const html = `<!DOCTYPE html>
 <html>
@@ -214,7 +235,7 @@ app.post('/api/create-token', async (req, res) => {
     );
     
     // Generate unique addon URL with token
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const baseUrl = getBaseUrl(req);
     const encryptedToken = Buffer.from(JSON.stringify(encrypted)).toString('base64');
     const addonUrl = `${baseUrl}/stremio/${token}/${encryptedToken}/manifest.json`;
     
