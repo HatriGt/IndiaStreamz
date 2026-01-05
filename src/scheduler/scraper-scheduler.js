@@ -75,12 +75,29 @@ class ScraperScheduler {
         throw new Error('Invalid scraped data structure');
       }
 
-      // Check if we have any data
-      const hasData = scrapedData.catalogs && Object.keys(scrapedData.catalogs).length > 0;
+      // Check if we have any new data
+      const hasNewMovies = scrapedData.movies && Object.keys(scrapedData.movies).length > 0;
+      const hasNewSeries = scrapedData.series && Object.keys(scrapedData.series).length > 0;
+      const hasNewData = hasNewMovies || hasNewSeries;
       
-      if (!hasData) {
-        throw new Error('No data scraped');
+      // Check if catalogs have content (might be empty if all items were skipped)
+      const hasCatalogData = scrapedData.catalogs && Object.values(scrapedData.catalogs).some(catalog => Array.isArray(catalog) && catalog.length > 0);
+      
+      if (!hasNewData && !hasCatalogData) {
+        logger.warn('No new data scraped - all items were already cached. Existing cache preserved.');
+        // Don't throw error - this is normal when all items are already cached
+        // Just log and return without updating cache (finally block will reset isRunning)
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        logger.info(`Total scrape duration: ${duration}s`);
+        return;
       }
+      
+      if (!hasCatalogData && hasNewData) {
+        logger.warn('New movies/series found but catalogs are empty - this should not happen');
+      }
+      
+      // If we have new data but no catalog data, still proceed (catalogs will be skipped in setAll)
+      // If we have catalog data, proceed to update cache
 
       // Update cache atomically
       const success = await fileCache.setAll(scrapedData);

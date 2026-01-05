@@ -108,9 +108,15 @@ class FileCache {
     const finalFiles = [];
 
     try {
-      // Write catalogs
+      // Write catalogs (only if they have content - don't overwrite with empty arrays)
       if (data.catalogs) {
         for (const [language, content] of Object.entries(data.catalogs)) {
+          // Skip writing empty catalogs to avoid overwriting existing data
+          if (!Array.isArray(content) || content.length === 0) {
+            logger.debug(`Skipping empty catalog for language: ${language}`);
+            continue;
+          }
+          
           const tempPath = path.join(this.catalogsDir, `${language}.json.tmp`);
           const finalPath = path.join(this.catalogsDir, `${language}.json`);
           
