@@ -44,6 +44,11 @@ module.exports = {
   TORBOX_API_URL: 'https://api.torbox.app',
   TORBOX_TIMEOUT: 30000, // 30 seconds
   TORBOX_POLL_INTERVAL: 2000, // 2 seconds
+  TORBOX_PROXY_TIMEOUT: 300000, // 5 minutes (for non-cached torrents in proxy route)
+  
+  // Proxy route rate limiting
+  PROXY_RATE_LIMIT_WINDOW: 60000, // 1 minute
+  PROXY_RATE_LIMIT_MAX: 10, // 10 requests per window
   
   // TMDB API Configuration
   // Bun automatically loads .env files, so process.env should have it

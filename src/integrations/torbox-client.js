@@ -99,7 +99,72 @@ class TorboxClient {
   }
 
   /**
-   * Check if magnet is already cached in Torbox by checking mylist (most reliable method)
+   * Check if torrent is cached in Torbox infrastructure (not just in user's account)
+   * Uses the checkcached API endpoint
+   * @param {string} magnetLink - Magnet link to check
+   * @returns {Promise<{cached: boolean, hash: string}|null>} - Returns cache status or null on failure
+   */
+  async checkCachedInInfrastructure(magnetLink) {
+    try {
+      // Extract infoHash from magnet link
+      const infoHash = this.extractInfoHash(magnetLink);
+      if (!infoHash) {
+        logger.debug(`Torbox: Could not extract infoHash from magnet link`);
+        return null;
+      }
+
+      // Call checkcached endpoint
+      const response = await this.client.get('/api/torrents/checkcached', {
+        params: {
+          hash: infoHash
+        }
+      });
+
+      // Handle response format: { success: true, data: { [hash]: {...} } }
+      // If torrent is cached, data object contains the hash as a key
+      // If not cached, data object is empty {}
+      let isCached = false;
+      const responseData = response.data;
+      const infoHashLower = infoHash.toLowerCase();
+      
+      // Check if response.data.data exists and contains the hash as a key
+      if (responseData?.data && typeof responseData.data === 'object') {
+        // Check if the hash exists as a key in the data object (case-insensitive)
+        const dataKeys = Object.keys(responseData.data);
+        isCached = dataKeys.length > 0 && dataKeys.some(key => key.toLowerCase() === infoHashLower);
+      }
+      
+      // Fallback: Check for other possible response formats
+      if (!isCached) {
+        if (typeof responseData === 'boolean') {
+          isCached = responseData === true;
+        } else if (responseData?.cached !== undefined) {
+          isCached = responseData.cached === true || responseData.cached === 1;
+        } else if (responseData?.data?.cached !== undefined) {
+          isCached = responseData.data.cached === true || responseData.data.cached === 1;
+        }
+      }
+      
+      if (isCached) {
+        logger.debug(`Torbox: Torrent is cached in infrastructure (hash: ${infoHash.substring(0, 8)}...)`);
+      } else {
+        logger.debug(`Torbox: Torrent is NOT cached in infrastructure (hash: ${infoHash.substring(0, 8)}...), response:`, JSON.stringify(responseData));
+      }
+
+      return {
+        cached: isCached,
+        hash: infoHash
+      };
+    } catch (error) {
+      // If endpoint doesn't exist or returns error, log and return null
+      logger.debug(`Torbox: Error checking infrastructure cache:`, error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Check if magnet is already cached in Torbox
+   * First checks infrastructure cache, then checks mylist
    * According to Torbox API docs: GET /api/torrents/mylist returns is_cached field for each torrent
    * @param {string} magnetLink - Magnet link to check
    * @param {Array} torrentList - Optional: pre-fetched torrent list to avoid multiple API calls
@@ -114,13 +179,46 @@ class TorboxClient {
         return null;
       }
 
-      // Use provided list or fetch mylist
+      // FIRST: Check if cached in infrastructure (without adding to account)
+      const infrastructureCache = await this.checkCachedInInfrastructure(magnetLink);
+      if (infrastructureCache && infrastructureCache.cached) {
+        logger.debug(`Torbox: Torrent is cached in infrastructure (hash: ${infoHash.substring(0, 8)}...)`);
+        // Check if it's also in mylist (to get torrent_id for streaming URL)
+        let torrents = torrentList;
+        if (!torrents) {
+          torrents = await this.getMyTorrents();
+        }
+        
+        const torrent = torrents.find(t => {
+          const torrentHash = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
+          return torrentHash === infoHash;
+        });
+
+        return {
+          cached: true, // Cached in infrastructure
+          data: torrent ? {
+            torrent_id: torrent.torrent_id || torrent.id,
+            hash: torrent.hash || torrent.info_hash || torrent.infoHash || infoHash,
+            is_cached: torrent.is_cached,
+            cached: torrent.cached,
+            status: torrent.status || torrent.state,
+            hls_url: torrent.hls_url,
+            stream_url: torrent.stream_url
+          } : {
+            hash: infoHash,
+            is_cached: true,
+            cached: true
+          },
+          detail: 'Found cached torrent in infrastructure'
+        };
+      }
+
+      // SECOND: Check if in mylist (even if not cached in infrastructure)
       let torrents = torrentList;
       if (!torrents) {
         torrents = await this.getMyTorrents();
       }
       
-      // Find torrent by hash (check multiple hash field names)
       const torrent = torrents.find(t => {
         const torrentHash = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
         return torrentHash === infoHash;
@@ -128,8 +226,6 @@ class TorboxClient {
 
       if (torrent) {
         // Check is_cached field directly (from API docs)
-        // Also check if hls_url or stream_url exists - that means it's ready to stream
-        // Also check status - if status is 'completed' or 'ready', it might be cached
         const hasStreamUrl = !!(torrent.hls_url || torrent.stream_url);
         const status = (torrent.status || torrent.state || '').toLowerCase();
         const isCompleted = status === 'completed' || status === 'ready' || status === 'cached' || status === 'downloaded';
@@ -161,10 +257,16 @@ class TorboxClient {
         };
       }
       
-      logger.debug(`Torbox: Torrent not found in mylist (hash: ${infoHash.substring(0, 8)}...)`);
-      return null;
+      logger.debug(`Torbox: Torrent not found in mylist and not cached in infrastructure (hash: ${infoHash.substring(0, 8)}...)`);
+      return {
+        cached: false,
+        data: {
+          hash: infoHash
+        },
+        detail: 'Torrent not found in mylist and not cached in infrastructure'
+      };
     } catch (error) {
-      logger.error(`Torbox: Error checking cache via mylist:`, error.response?.data || error.message);
+      logger.error(`Torbox: Error checking cache:`, error.response?.data || error.message);
       return null;
     }
   }
@@ -311,7 +413,7 @@ class TorboxClient {
   /**
    * Wait for torrent to be ready (downloaded/cached)
    * @param {string} torrentId - Torrent ID from Torbox
-   * @param {number} maxWaitTime - Maximum time to wait in ms (default: 30s)
+   * @param {number} maxWaitTime - Maximum time to wait in ms (default: 30s, use TORBOX_PROXY_TIMEOUT for proxy route)
    * @returns {Promise<string|null>} - Returns streaming URL when ready, or null on timeout/failure
    */
   async waitForReady(torrentId, maxWaitTime = constants.TORBOX_TIMEOUT) {

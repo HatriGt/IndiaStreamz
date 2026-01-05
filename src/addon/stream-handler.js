@@ -4,6 +4,7 @@ const constants = require('../utils/constants');
 const TorboxClient = require('../integrations/torbox-client');
 const torboxConfig = require('../utils/torbox-config');
 const tokenManager = require('../utils/token-manager');
+const { encodeMagnet } = require('../utils/magnet-encoder');
 
 // Global storage for query parameters (set by Express middleware)
 // This is a workaround since Stremio doesn't pass query params to handlers
@@ -51,6 +52,7 @@ async function handleStream({ type, id, extra }) {
     // Priority: 1. extra parameter, 2. global query params (set by stream route from token)
     let torboxApiKey = extra?.torboxApiKey;
     let torboxApiUrl = extra?.torboxApiUrl || constants.TORBOX_API_URL;
+    let token = extra?.token;
     
     // Check global query params (set by Express middleware from token)
     if (!torboxApiKey) {
@@ -59,6 +61,7 @@ async function handleStream({ type, id, extra }) {
         // Query params already contains torboxApiKey (extracted from token by route)
         torboxApiKey = queryParams.torboxApiKey;
         torboxApiUrl = queryParams.torboxApiUrl || constants.TORBOX_API_URL;
+        token = queryParams.token;
         if (torboxApiKey) {
           logger.info(`[STREAM] Got Torbox config from token for ${id}`);
         }
@@ -79,9 +82,15 @@ async function handleStream({ type, id, extra }) {
     // Initialize Torbox client
     const torbox = new TorboxClient(torboxApiKey, torboxApiUrl);
     
-    // Convert magnets to streaming URLs
-    logger.debug(`Converting ${cachedStreams.length} streams with Torbox`);
-    const convertedStreams = await convertStreams(cachedStreams, torbox);
+    // Get base URL for proxy URLs (if available from extra)
+    const baseUrl = extra?.baseUrl || 'http://localhost:3005';
+    
+    // Get encrypted token part from extra (passed from server route)
+    const encrypted = extra?.encrypted;
+    
+    // Convert magnets to streaming URLs (check-only mode)
+    logger.debug(`Checking cache status for ${cachedStreams.length} streams with Torbox`);
+    const convertedStreams = await convertStreams(cachedStreams, torbox, token, encrypted, baseUrl);
     
     logger.debug(`Returning ${convertedStreams.length} converted streams for ${type}: ${id}`);
     return { streams: convertedStreams };
@@ -103,6 +112,26 @@ async function handleStream({ type, id, extra }) {
  * @param {TorboxClient} torbox - Torbox client instance
  * @returns {Promise<Array>} - Array of stream objects with direct URLs or fallback to infoHash
  */
+/**
+ * Generate proxy URL for non-cached torrents
+ * @param {string} magnetLink - The magnet link to encode
+ * @param {string} token - The user's token
+ * @param {string} encrypted - The encrypted token part from URL
+ * @param {string} baseUrl - The base URL of the server
+ * @returns {string} - The proxy URL
+ */
+function generateProxyUrl(magnetLink, token, encrypted, baseUrl) {
+  try {
+    const encodedMagnet = encodeMagnet(magnetLink);
+    // Use the encrypted part from the URL path
+    // Format: /stremio/:token/:encrypted/proxy/:magnetHash
+    return `${baseUrl}/stremio/${token}/${encrypted}/proxy/${encodedMagnet}`;
+  } catch (error) {
+    logger.error(`[STREAM] Failed to generate proxy URL: ${error.message}`);
+    return null;
+  }
+}
+
 /**
  * Format stream name with emojis and green checkmark for cached streams
  */
@@ -126,7 +155,7 @@ function formatStreamNameWithEmoji(streamName, isCached) {
   return `${cachedIndicator}${emoji} ${streamName}`;
 }
 
-async function convertStreams(cachedStreams, torbox) {
+async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) {
   // Limit to first 5 streams to avoid rate limiting
   // User can still see all streams, but only top 5 will be converted
   const streamsToConvert = cachedStreams.slice(0, 5);
@@ -135,16 +164,16 @@ async function convertStreams(cachedStreams, torbox) {
   // Get API key for proxyHeaders (needed for authenticated streaming URLs)
   const apiKey = torbox.apiKey;
   
-  // Fetch mylist FIRST before processing streams (needed for both conversion and cache checking)
+  // Fetch mylist FIRST before processing streams (needed for cache checking)
   let myTorrents = null;
   try {
     myTorrents = await torbox.getMyTorrents();
-    logger.debug(`Fetched ${myTorrents.length} torrents from mylist for conversion and cache checking`);
+    logger.debug(`Fetched ${myTorrents.length} torrents from mylist for cache checking`);
   } catch (error) {
     logger.debug(`Failed to fetch mylist, will check individually: ${error.message}`);
   }
   
-  // Process all streams in parallel for much faster response time
+  // Process all streams in parallel - ONLY CHECK CACHE STATUS, DON'T ADD TORRENTS
   const conversionPromises = streamsToConvert.map(async (stream) => {
     try {
       // Get magnet link from externalUrl
@@ -155,14 +184,30 @@ async function convertStreams(cachedStreams, torbox) {
         return { ...stream, isCached: false };
       }
 
-      logger.debug(`Converting magnet to streaming URL: ${magnetLink.substring(0, 50)}...`);
+      logger.debug(`Checking cache status for magnet: ${magnetLink.substring(0, 50)}...`);
       
-      // Convert magnet to streaming URL (pass mylist to check for cached torrents first)
-      const result = await torbox.convertMagnetToStreamingUrl(magnetLink, myTorrents);
-      const { streamingUrl, isCached } = result || { streamingUrl: null, isCached: false };
+      // ONLY check if cached - don't add torrents yet
+      const cached = await torbox.checkCached(magnetLink, myTorrents);
+      const isCached = cached && cached.cached === true;
       
       // Format stream name with emojis and green checkmark
       const streamName = formatStreamNameWithEmoji(stream.name, isCached);
+      
+      // If torrent is cached (infrastructure or mylist), check if we have immediate streaming URL
+      // IMPORTANT: Don't call getStreamingUrl() here - that will be done in proxy route when user plays
+      let streamingUrl = null;
+      if (cached && cached.cached && cached.data) {
+        // Only use streaming URL if it's already in the mylist response (no API call needed)
+        // Don't call getStreamingUrl() here - that will be done in proxy route when user plays
+        if (cached.data.hls_url || cached.data.stream_url) {
+          streamingUrl = cached.data.hls_url || cached.data.stream_url;
+          logger.debug(`Found cached torrent with streaming URL in mylist: ${streamingUrl.substring(0, 50)}...`);
+        } else {
+          // Torrent is cached but no URL in mylist response
+          // Return proxy URL - it will get the streaming URL when user plays
+          logger.debug(`Torrent cached but no URL in mylist, will use proxy URL to get streaming URL on play`);
+        }
+      }
       
       if (streamingUrl) {
         // Check if URL is a direct video file (MP4, MKV, etc.) or a streaming endpoint
@@ -218,19 +263,22 @@ async function convertStreams(cachedStreams, torbox) {
           };
         }
       } else {
-        // Failed: fallback to infoHash (desktop only)
-        logger.warn(`Failed to convert magnet, falling back to infoHash`);
+        // Not in mylist or not cached - return proxy URL (will add to Torbox when user plays)
+        logger.debug(`Torrent not cached, generating proxy URL (will add to Torbox when user plays)`);
+        const proxyUrl = token && encrypted && baseUrl ? generateProxyUrl(magnetLink, token, encrypted, baseUrl) : null;
+        
         return {
           name: streamName,
-          infoHash: stream.infoHash,
+          url: proxyUrl || undefined, // Use proxy URL if available
+          infoHash: stream.infoHash, // Keep infoHash as fallback for desktop Stremio
           externalUrl: magnetLink,
           isCached,
           behaviorHints: stream.behaviorHints
         };
       }
     } catch (error) {
-      // Error converting: fallback to infoHash
-      logger.error(`Error converting stream:`, error.message);
+      // Error checking cache: fallback to infoHash
+      logger.error(`Error checking cache for stream:`, error.message);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
         infoHash: stream.infoHash,

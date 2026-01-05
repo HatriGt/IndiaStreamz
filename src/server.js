@@ -6,6 +6,7 @@ try {
 }
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const logger = require('./utils/logger');
 const constants = require('./utils/constants');
@@ -16,6 +17,7 @@ const streamHandler = require('./addon/stream-handler');
 const ScraperScheduler = require('./scheduler/scraper-scheduler');
 const torboxConfig = require('./utils/torbox-config');
 const tokenManager = require('./utils/token-manager');
+const proxyStreamHandler = require('./routes/proxy-stream');
 
 const app = express();
 
@@ -256,6 +258,28 @@ app.post('/api/create-token', async (req, res) => {
 const scheduler = new ScraperScheduler();
 scheduler.start();
 
+// Create rate limiter for proxy route
+const proxyRateLimiter = rateLimit({
+  windowMs: constants.PROXY_RATE_LIMIT_WINDOW,
+  max: constants.PROXY_RATE_LIMIT_MAX,
+  message: { error: 'Too many requests', message: 'Rate limit exceeded. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Fix trust proxy validation issue
+  validate: {
+    trustProxy: false
+  },
+  // Use request IP directly
+  keyGenerator: (req) => {
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  }
+});
+
+// Register proxy route BEFORE serveHTTP to ensure it takes precedence
+// Route: /stremio/:token/:encrypted/proxy/:magnetHash
+app.get('/stremio/:token/:encrypted/proxy/:magnetHash', proxyRateLimiter, proxyStreamHandler);
+logger.info('Proxy route registered: /stremio/:token/:encrypted/proxy/:magnetHash');
+
 // API key is extracted by middleware and set in query params
 // The stream handler will get it from there
 
@@ -344,7 +368,14 @@ app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => 
   }
   
   try {
-    const streamData = await streamHandler({ type, id, extra: req.query });
+    // Get base URL for proxy URLs
+    const baseUrl = getBaseUrl(req);
+    const encrypted = req.params.encrypted; // Get encrypted part from URL path
+    const streamData = await streamHandler({ 
+      type, 
+      id, 
+      extra: { ...req.query, token: token, encrypted: encrypted, baseUrl: baseUrl } 
+    });
     res.json(streamData);
   } catch (error) {
     logger.error('[STREAM] Error getting streams:', error);
@@ -438,7 +469,14 @@ app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => 
   }
 
   try {
-    const streamData = await streamHandler({ type, id, extra: req.query });
+    // Get base URL for proxy URLs
+    const baseUrl = getBaseUrl(req);
+    const encrypted = req.params.encrypted; // Get encrypted part from URL path
+    const streamData = await streamHandler({ 
+      type, 
+      id, 
+      extra: { ...req.query, token: token, encrypted: encrypted, baseUrl: baseUrl } 
+    });
     res.json(streamData);
   } catch (error) {
     logger.error('[STREAM] Error getting stream:', error);
