@@ -258,6 +258,57 @@ app.post('/api/create-token', async (req, res) => {
 const scheduler = new ScraperScheduler();
 scheduler.start();
 
+// Secret route to trigger rescrape
+// Usage: GET /api/rescrape?secret=YOUR_SECRET_TOKEN
+app.get('/api/rescrape', async (req, res) => {
+  try {
+    const secretToken = process.env.RESCRAPE_SECRET_TOKEN || 'changeme';
+    const providedSecret = req.query.secret;
+    
+    if (!providedSecret) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Secret token required. Use ?secret=YOUR_TOKEN' 
+      });
+    }
+    
+    if (providedSecret !== secretToken) {
+      logger.warn('[RESCRAPE] Invalid secret token attempt');
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Invalid secret token' 
+      });
+    }
+    
+    // Check if scrape is already running
+    if (scheduler.isRunning) {
+      return res.json({ 
+        success: false, 
+        message: 'Scrape is already running',
+        isRunning: true
+      });
+    }
+    
+    // Trigger manual scrape (non-blocking)
+    logger.info('[RESCRAPE] Manual rescrape triggered via API');
+    scheduler.triggerManual().catch(error => {
+      logger.error('[RESCRAPE] Error during manual scrape:', error);
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Rescrape triggered successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('[RESCRAPE] Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Create rate limiter for proxy route
 const proxyRateLimiter = rateLimit({
   windowMs: constants.PROXY_RATE_LIMIT_WINDOW,
