@@ -186,6 +186,25 @@ class FileCache {
   }
 
   /**
+   * Atomic write all cache data with full replacement
+   * Clears existing cache first, then writes new data
+   * Structure: { catalogs: { language: [...content] }, movies: { id: {...} }, series: { id: {...} }, streams: { id: [...] } }
+   */
+  async setAllReplace(data) {
+    try {
+      // First, clear all existing cache
+      logger.info('Clearing existing cache for full replacement...');
+      await this.clear();
+      
+      // Then write new data
+      return await this.setAll(data);
+    } catch (error) {
+      logger.error('Error in setAllReplace:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get all movies and series from all catalogs
    * Returns an object with movies and series arrays
    */

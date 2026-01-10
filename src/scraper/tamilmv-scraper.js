@@ -87,8 +87,9 @@ class TamilMVScraper {
 
   /**
    * Scrape all movies and series from homepage
+   * @param {boolean} skipCacheCheck - If true, skip checking cache before scraping
    */
-  async scrapeAll() {
+  async scrapeAll(skipCacheCheck = false) {
     logger.info('Starting full scrape from homepage...');
     const result = {
       catalogs: {},
@@ -135,26 +136,28 @@ class TamilMVScraper {
         const listing = listings[i];
         logger.debug(`Processing ${i + 1}/${limit}: ${listing.title.substring(0, 50)}...`);
         
-        // Pre-check: Try to detect if this content is already cached
-        // Detect languages and series info from listing title
-        const preDetectedLanguages = detectLanguagesFromTitle(listing.title);
-        const preSeriesInfo = detectSeriesFromTitle(listing.title);
-        
+        // Pre-check: Try to detect if this content is already cached (skip if skipCacheCheck is true)
         let alreadyCached = false;
-        if (preDetectedLanguages.length > 0) {
-          if (preSeriesInfo.isSeries) {
-            // Check if series exists in cache
-            const potentialSeriesId = generateSeriesId(listing.title, preSeriesInfo.season, preDetectedLanguages);
-            alreadyCached = await fileCache.hasMovie(potentialSeriesId); // Series are stored in moviesDir
-            if (alreadyCached) {
-              logger.debug(`Skipping cached series: ${listing.title.substring(0, 50)}... (ID: ${potentialSeriesId})`);
-            }
-          } else {
-            // Check if movie exists in cache
-            const potentialMovieId = generateMovieId(listing.title, preDetectedLanguages);
-            alreadyCached = await fileCache.hasMovie(potentialMovieId);
-            if (alreadyCached) {
-              logger.debug(`Skipping cached movie: ${listing.title.substring(0, 50)}... (ID: ${potentialMovieId})`);
+        if (!skipCacheCheck) {
+          // Detect languages and series info from listing title
+          const preDetectedLanguages = detectLanguagesFromTitle(listing.title);
+          const preSeriesInfo = detectSeriesFromTitle(listing.title);
+          
+          if (preDetectedLanguages.length > 0) {
+            if (preSeriesInfo.isSeries) {
+              // Check if series exists in cache
+              const potentialSeriesId = generateSeriesId(listing.title, preSeriesInfo.season, preDetectedLanguages);
+              alreadyCached = await fileCache.hasMovie(potentialSeriesId); // Series are stored in moviesDir
+              if (alreadyCached) {
+                logger.debug(`Skipping cached series: ${listing.title.substring(0, 50)}... (ID: ${potentialSeriesId})`);
+              }
+            } else {
+              // Check if movie exists in cache
+              const potentialMovieId = generateMovieId(listing.title, preDetectedLanguages);
+              alreadyCached = await fileCache.hasMovie(potentialMovieId);
+              if (alreadyCached) {
+                logger.debug(`Skipping cached movie: ${listing.title.substring(0, 50)}... (ID: ${potentialMovieId})`);
+              }
             }
           }
         }
@@ -195,7 +198,7 @@ class TamilMVScraper {
           const seriesId = generateSeriesId(contentData.title, seriesInfo.season, detectedLanguages);
           
           // Double-check: Make sure it's not already in cache (in case ID generation differs)
-          if (await fileCache.hasMovie(seriesId)) {
+          if (!skipCacheCheck && await fileCache.hasMovie(seriesId)) {
             logger.debug(`Skipping cached series (double-check): ${contentData.title} (ID: ${seriesId})`);
             skippedCached++;
             continue;
@@ -230,7 +233,7 @@ class TamilMVScraper {
           const movieId = generateMovieId(contentData.title, detectedLanguages);
           
           // Double-check: Make sure it's not already in cache (in case ID generation differs)
-          if (await fileCache.hasMovie(movieId)) {
+          if (!skipCacheCheck && await fileCache.hasMovie(movieId)) {
             logger.debug(`Skipping cached movie (double-check): ${contentData.title} (ID: ${movieId})`);
             skippedCached++;
             continue;

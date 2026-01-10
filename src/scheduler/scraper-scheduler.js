@@ -133,6 +133,64 @@ class ScraperScheduler {
   }
 
   /**
+   * Trigger a full replacement scrape (clears cache and rescrapes everything)
+   */
+  async triggerFullReplacement() {
+    if (this.isRunning) {
+      logger.warn('Scrape job already running, cannot start full replacement');
+      throw new Error('Scrape job already running');
+    }
+
+    this.isRunning = true;
+    const startTime = Date.now();
+
+    try {
+      logger.info('=== Starting FULL REPLACEMENT scrape (cache will be cleared) ===');
+      
+      // Scrape all languages and movies without checking cache
+      const scrapedData = await this.scraper.scrapeAll(true); // skipCacheCheck = true
+      
+      // Validate data structure
+      if (!scrapedData || typeof scrapedData !== 'object') {
+        throw new Error('Invalid scraped data structure');
+      }
+
+      // Check if we have any data
+      const hasMovies = scrapedData.movies && Object.keys(scrapedData.movies).length > 0;
+      const hasSeries = scrapedData.series && Object.keys(scrapedData.series).length > 0;
+      const hasCatalogData = scrapedData.catalogs && Object.values(scrapedData.catalogs).some(catalog => Array.isArray(catalog) && catalog.length > 0);
+      
+      if (!hasMovies && !hasSeries && !hasCatalogData) {
+        logger.warn('No data scraped - cache will be empty');
+      }
+
+      // Replace cache completely (clears old cache first)
+      const success = await fileCache.setAllReplace(scrapedData);
+      
+      if (success) {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        const languageCount = Object.keys(scrapedData.catalogs || {}).length;
+        const totalMovies = Object.keys(scrapedData.movies || {}).length;
+        const totalSeries = Object.keys(scrapedData.series || {}).length;
+        
+        logger.success(`=== Full replacement scrape completed successfully in ${duration}s ===`);
+        logger.info(`Languages: ${languageCount}, Movies: ${totalMovies}, Series: ${totalSeries}`);
+      } else {
+        throw new Error('Failed to replace cache');
+      }
+    } catch (error) {
+      logger.error('=== Full replacement scrape failed ===');
+      logger.error('Error details:', error.message);
+      logger.error('Stack:', error.stack);
+      throw error; // Re-throw so caller can handle it
+    } finally {
+      this.isRunning = false;
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      logger.info(`Total scrape duration: ${duration}s`);
+    }
+  }
+
+  /**
    * Stop the scheduler
    */
   stop() {

@@ -470,6 +470,58 @@ app.get('/api/cache/list', async (req, res) => {
   }
 });
 
+// API endpoint to trigger full replacement scrape (clears cache and rescrapes everything)
+// Usage: GET /api/cache/full-replace?secret=YOUR_SECRET_TOKEN
+app.get('/api/cache/full-replace', async (req, res) => {
+  try {
+    const secretToken = process.env.RESCRAPE_SECRET_TOKEN || 'changeme';
+    const providedSecret = req.query.secret;
+    
+    if (!providedSecret) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Secret token required. Use ?secret=YOUR_TOKEN' 
+      });
+    }
+    
+    if (providedSecret !== secretToken) {
+      logger.warn('[FULL-REPLACE] Invalid secret token attempt');
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Invalid secret token' 
+      });
+    }
+    
+    // Check if scrape is already running
+    if (scheduler.isRunning) {
+      return res.status(409).json({ 
+        success: false, 
+        message: 'Scrape is already running',
+        isRunning: true
+      });
+    }
+    
+    // Trigger full replacement scrape (non-blocking)
+    logger.info('[FULL-REPLACE] Full replacement scrape triggered via API');
+    scheduler.triggerFullReplacement().catch(error => {
+      logger.error('[FULL-REPLACE] Error during full replacement scrape:', error);
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Full replacement scrape triggered successfully. Cache will be cleared and replaced.',
+      timestamp: new Date().toISOString(),
+      warning: 'This will clear all existing cache and replace it with newly scraped data'
+    });
+  } catch (error) {
+    logger.error('[FULL-REPLACE] Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Call serveHTTP to mount Stremio addon routes on our Express app
 // Don't pass port - this only mounts routes, doesn't start a server
 serveHTTP(addonInterface, {
