@@ -313,7 +313,7 @@ class TamilMVScraper {
 
       logger.info(`Enriching ${movies.length} movies with TMDB metadata...`);
 
-      // Step 1: Prepare all movies for TMDB search
+      // Step 1: Prepare all movies for TMDB search with variations
       const searchPromises = movies.map((movieData, index) => {
         const movieId = movieIds[index];
         // Get title from movieData - it might be in 'name' (from structureMovieForMeta) or 'title' (from contentData)
@@ -324,17 +324,19 @@ class TamilMVScraper {
         // Use year from movieData if available, otherwise use extracted year
         const searchYear = movieData.year || extractedYear;
 
-        return this.tmdbClient.searchMovie(cleanTitle, searchYear)
+        // Use searchMovieWithVariations instead of searchMovie for better matching
+        return this.tmdbClient.searchMovieWithVariations(cleanTitle, searchYear)
           .then(searchResults => ({
             movieId,
             movieData,
             searchResults,
             cleanTitle,
-            searchYear
+            searchYear,
+            originalTitle: title
           }))
           .catch(error => {
             logger.debug(`TMDB search failed for "${cleanTitle}":`, error.message);
-            return { movieId, movieData, searchResults: null, cleanTitle, searchYear };
+            return { movieId, movieData, searchResults: null, cleanTitle, searchYear, originalTitle: title };
           });
       });
 
@@ -348,7 +350,7 @@ class TamilMVScraper {
 
       searchResults.forEach((result, index) => {
         if (result.status === 'fulfilled') {
-          const { movieId, movieData, searchResults: tmdbResults, cleanTitle, searchYear } = result.value;
+          const { movieId, movieData, searchResults: tmdbResults, cleanTitle, searchYear, originalTitle } = result.value;
           
           if (!tmdbResults || tmdbResults.length === 0) {
             // No TMDB results, keep original movie data
@@ -356,8 +358,9 @@ class TamilMVScraper {
             return;
           }
 
-          // Find best match
-          const bestMatch = this.tmdbClient.findBestMatch(tmdbResults, cleanTitle, searchYear);
+          // Find best match (use originalTitle if available, otherwise cleanTitle)
+          const titleForMatching = originalTitle || cleanTitle;
+          const bestMatch = this.tmdbClient.findBestMatch(tmdbResults, titleForMatching, searchYear);
           
           if (!bestMatch || !bestMatch.id) {
             // No good match, keep original

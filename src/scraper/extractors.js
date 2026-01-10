@@ -473,8 +473,10 @@ function cleanTitleForTMDB(title) {
     // Remove quality indicators
     .replace(/\s*-\s*\[.*?\]/g, '') // Remove [1080p & 720p...]
     .replace(/\s*-\s*\(.*?\)/g, '') // Remove (DD+5.1...)
-    // Remove common technical terms
-    .replace(/\s*(TRUE|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|HC-ESub|Org Auds|Original Audios|HQ Clean Audio|HQ Clean Audios)\s*/gi, ' ')
+    // Remove "Clean Audio" as a suffix (with dash) - do this first
+    .replace(/\s*-\s*Clean\s+Audio\s*$/gi, '')
+    // Remove common technical terms (including standalone "Clean Audio")
+    .replace(/\s*(TRUE|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|HC-ESub|Org Auds|Original Audios|HQ Clean Audio|HQ Clean Audios|Clean Audio)\s*/gi, ' ')
     .replace(/\s*-\s*-\s*/g, ' ') // Remove multiple dashes
     .replace(/\s+/g, ' ')
     .trim();

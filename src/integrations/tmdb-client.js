@@ -114,6 +114,86 @@ class TMDBClient {
   }
 
   /**
+   * Generate title variations for better matching
+   * @param {string} title - Original title
+   * @returns {Array<string>} - Array of title variations
+   */
+  generateTitleVariations(title) {
+    const variations = new Set([title]); // Start with original
+    
+    // Remove "The" prefix variations
+    if (title.toLowerCase().startsWith('the ')) {
+      variations.add(title.substring(4).trim());
+    } else {
+      variations.add(`The ${title}`);
+    }
+    
+    // Remove common suffixes (with and without dash)
+    const suffixes = [
+      ' - Clean Audio', ' Clean Audio', '- Clean Audio',
+      ' HD', ' - HD', '- HD',
+      ' HQ', ' - HQ', '- HQ',
+      ' PreDVD', ' - PreDVD', '- PreDVD'
+    ];
+    
+    for (const suffix of suffixes) {
+      const lowerTitle = title.toLowerCase();
+      const lowerSuffix = suffix.toLowerCase();
+      if (lowerTitle.endsWith(lowerSuffix)) {
+        variations.add(title.substring(0, title.length - suffix.length).trim());
+      }
+    }
+    
+    // Remove parenthetical info but keep main title
+    const withoutParentheses = title.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    if (withoutParentheses && withoutParentheses !== title) {
+      variations.add(withoutParentheses);
+    }
+    
+    // Remove trailing dashes and clean
+    variations.forEach(v => {
+      const cleaned = v.replace(/\s*-\s*$/, '').trim();
+      if (cleaned && cleaned !== v) {
+        variations.add(cleaned);
+      }
+    });
+    
+    return Array.from(variations).filter(v => v.length > 0);
+  }
+
+  /**
+   * Search with multiple title variations for better matching
+   * @param {string} title - Movie title
+   * @param {number|null} year - Release year
+   * @returns {Promise<Array>} - Combined search results from all variations
+   */
+  async searchMovieWithVariations(title, year = null) {
+    const variations = this.generateTitleVariations(title);
+    const allResults = [];
+    
+    // Try each variation
+    for (const variation of variations) {
+      try {
+        const results = await this.searchMovie(variation, year);
+        if (results && results.length > 0) {
+          allResults.push(...results);
+        }
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+        logger.debug(`TMDB search failed for variation "${variation}":`, error.message);
+      }
+    }
+    
+    // Remove duplicates by ID
+    const uniqueResults = Array.from(
+      new Map(allResults.map(r => [r.id, r])).values()
+    );
+    
+    return uniqueResults;
+  }
+
+  /**
    * Find best match from search results using fuzzy matching
    * @param {Array} searchResults - TMDB search results
    * @param {string} originalTitle - Original movie title from scraper
@@ -125,8 +205,12 @@ class TMDBClient {
       return null;
     }
 
-    // Normalize titles for comparison
-    const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Normalize titles for comparison (more aggressive normalization)
+    const normalize = (str) => {
+      return str.toLowerCase()
+        .replace(/[^a-z0-9]/g, '') // Remove all non-alphanumeric
+        .replace(/\s+/g, ''); // Remove all spaces
+    };
 
     const originalNormalized = normalize(originalTitle);
 
@@ -134,31 +218,32 @@ class TMDBClient {
     const scoredResults = searchResults.map(result => {
       let score = 0;
 
-      // Title similarity (exact match = 100, partial = 50)
+      // Title similarity
       const resultTitle = normalize(result.title || '');
+      
       if (resultTitle === originalNormalized) {
-        score += 100;
+        score += 100; // Exact match
       } else if (resultTitle.includes(originalNormalized) || originalNormalized.includes(resultTitle)) {
-        score += 50;
+        score += 60; // One contains the other (increased from 50)
       } else {
         // Calculate similarity percentage
         const similarity = this.calculateSimilarity(resultTitle, originalNormalized);
-        score += similarity * 30; // Max 30 points for similarity
+        score += similarity * 40; // Max 40 points for similarity (increased from 30)
       }
 
-      // Year match bonus
+      // Year match bonus (more important)
       if (year && result.release_date) {
         const resultYear = parseInt(result.release_date.substring(0, 4));
         if (resultYear === year) {
-          score += 20;
+          score += 30; // Exact year match (increased from 20)
         } else if (Math.abs(resultYear - year) <= 1) {
-          score += 10; // Close year match
+          score += 15; // Close year match (increased from 10)
         }
       }
 
-      // Popularity bonus (more popular = more likely correct)
+      // Popularity bonus
       if (result.popularity) {
-        score += Math.min(result.popularity / 100, 10); // Max 10 points
+        score += Math.min(result.popularity / 50, 15); // Max 15 points (increased from 10)
       }
 
       return { result, score };
@@ -167,14 +252,22 @@ class TMDBClient {
     // Sort by score (highest first)
     scoredResults.sort((a, b) => b.score - a.score);
 
-    // Return best match if score is reasonable (at least 30 points)
+    // Lower threshold from 30 to 20 for better matching
     const bestMatch = scoredResults[0];
-    if (bestMatch && bestMatch.score >= 30) {
+    if (bestMatch && bestMatch.score >= 20) {
+      logger.debug(`TMDB match found: "${originalTitle}" -> "${bestMatch.result.title}" (score: ${bestMatch.score.toFixed(1)})`);
       return bestMatch.result;
     }
 
-    // If no good match, return first result anyway (user can verify)
-    return searchResults[0];
+    // If score is low but we have results, log and return first result anyway
+    if (bestMatch && bestMatch.score > 0) {
+      logger.debug(`TMDB weak match: "${originalTitle}" -> "${bestMatch.result.title}" (score: ${bestMatch.score.toFixed(1)}, using anyway)`);
+      return bestMatch.result;
+    }
+
+    // No match found
+    logger.debug(`No TMDB match found for "${originalTitle}"`);
+    return null;
   }
 
   /**
