@@ -745,6 +745,9 @@ class TamilMVScraper {
     cleaned = cleaned.replace(/^Note:\s*[^.!?]+[.!?]\s*/gi, '');
     cleaned = cleaned.replace(/\s+Note:\s*[^.!?]+[.!?]\s*/gi, ' ');
     
+    // Remove empty parentheses with numbers: "()91"
+    cleaned = cleaned.replace(/\(\)\d+/g, '');
+    
     // Remove "EP XX TO XX AVAILABLE -> HERE" patterns
     cleaned = cleaned.replace(/EP\s*\d+\s+TO\s+\d+\s+AVAILABLE[^\n]*/gi, '');
     
@@ -757,6 +760,10 @@ class TamilMVScraper {
     // Remove repeated dashes and spaces
     cleaned = cleaned.replace(/\s*-\s*-\s*/g, ' ');
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    // Remove repeated text patterns (same phrase appearing multiple times)
+    // Match phrases of 15+ characters that repeat and keep only the first occurrence
+    cleaned = cleaned.replace(/(.{15,}?)(\s+\1)+/g, '$1');
     
     // Extract first meaningful sentence (50+ chars, not starting with number)
     const sentences = cleaned.split(/[.!?]\s+/);

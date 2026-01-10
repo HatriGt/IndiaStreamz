@@ -538,6 +538,10 @@ function cleanTitleForDisplay(title) {
   nameOnly = nameOnly.replace(/\s*DAY\s+\d+\s*$/gi, ''); // Remove "DAY 90" at end
   nameOnly = nameOnly.replace(/\s*\(\d+\)\s*DAY\s+\d+\s*$/gi, ''); // Remove "(91) DAY 90"
   
+  // Remove standalone episode numbers at end: "The Pitt 01" -> "The Pitt"
+  // Only remove 1-2 digit numbers (likely episode numbers), not 4-digit years
+  nameOnly = nameOnly.replace(/\s+(\d{1,2})\s*$/, '').trim();
+  
   // Remove year completely (no extraction, no re-addition)
   nameOnly = nameOnly.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
   nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();
