@@ -18,6 +18,7 @@ const ScraperScheduler = require('./scheduler/scraper-scheduler');
 const torboxConfig = require('./utils/torbox-config');
 const tokenManager = require('./utils/token-manager');
 const proxyStreamHandler = require('./routes/proxy-stream');
+const fileCache = require('./cache/file-cache');
 
 const app = express();
 
@@ -446,6 +447,27 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     port: constants.PORT 
   });
+});
+
+// API endpoint to list all movies and series in cache
+app.get('/api/cache/list', async (req, res) => {
+  try {
+    const cachedContent = await fileCache.getAllCachedContent();
+    
+    logger.info(`[CACHE] Listing cached content: ${cachedContent.movieCount} movies, ${cachedContent.seriesCount} series`);
+    
+    res.json({
+      success: true,
+      ...cachedContent,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('[CACHE] Error listing cached content:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
 });
 
 // Call serveHTTP to mount Stremio addon routes on our Express app

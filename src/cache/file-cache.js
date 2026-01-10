@@ -186,6 +186,58 @@ class FileCache {
   }
 
   /**
+   * Get all movies and series from all catalogs
+   * Returns an object with movies and series arrays
+   */
+  async getAllCachedContent() {
+    try {
+      const movies = [];
+      const series = [];
+      const languages = Object.values(constants.LANGUAGES);
+      
+      // Read all catalog files
+      for (const language of languages) {
+        const catalog = await this.getCatalog(language);
+        if (catalog && Array.isArray(catalog)) {
+          // Separate movies and series
+          for (const item of catalog) {
+            if (item.type === 'movie') {
+              movies.push(item);
+            } else if (item.type === 'series') {
+              series.push(item);
+            }
+          }
+        }
+      }
+      
+      // Remove duplicates based on id
+      const uniqueMovies = Array.from(
+        new Map(movies.map(item => [item.id, item])).values()
+      );
+      const uniqueSeries = Array.from(
+        new Map(series.map(item => [item.id, item])).values()
+      );
+      
+      return {
+        movies: uniqueMovies,
+        series: uniqueSeries,
+        total: uniqueMovies.length + uniqueSeries.length,
+        movieCount: uniqueMovies.length,
+        seriesCount: uniqueSeries.length
+      };
+    } catch (error) {
+      logger.error('Error getting all cached content:', error);
+      return {
+        movies: [],
+        series: [],
+        total: 0,
+        movieCount: 0,
+        seriesCount: 0
+      };
+    }
+  }
+
+  /**
    * Clear all cache
    */
   async clear() {
