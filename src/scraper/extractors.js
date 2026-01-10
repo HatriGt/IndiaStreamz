@@ -53,16 +53,30 @@ function structureMovieForCatalog(movieData) {
   const title = movieData.tmdbTitle || movieData.title || movieData.name || '';
   const displayName = title ? (movieData.tmdbTitle ? title : cleanTitleForDisplay(title)) : '';
   
+  // Ensure arrays are always arrays, never null
+  const genres = Array.isArray(movieData.genres) ? movieData.genres : [];
+  const director = Array.isArray(movieData.director) ? movieData.director : [];
+  const cast = Array.isArray(movieData.cast) ? movieData.cast : [];
+  
+  // Ensure description is meaningful
+  let description = movieData.description;
+  if (!description && displayName) {
+    const langStr = movieData.languages && Array.isArray(movieData.languages) && movieData.languages.length > 0
+      ? movieData.languages.join(', ')
+      : '';
+    description = langStr ? `${displayName} - ${langStr}` : displayName;
+  }
+  
   return {
-    id: movieData.id,
+    id: movieData.id || '',
     type: 'movie',
-    name: displayName || movieData.id, // Fallback to ID if name is empty
+    name: displayName || movieData.id || '',
     poster: movieData.poster || null,
-    description: movieData.description || `${displayName} - ${movieData.languages ? movieData.languages.join(', ') : ''}`,
-    genres: movieData.genres || [],
+    description: description || null,
+    genres: genres,
     releaseInfo: movieData.releaseInfo || null,
-    director: movieData.director || [],
-    cast: movieData.cast || [],
+    director: director,
+    cast: cast,
     imdbRating: movieData.imdbRating || null,
     background: movieData.background || null,
     logo: movieData.logo || null,
@@ -79,32 +93,51 @@ function structureMovieForMeta(movieData) {
   const title = movieData.tmdbTitle || movieData.title || movieData.name || '';
   const displayName = title ? (movieData.tmdbTitle ? title : cleanTitleForDisplay(title)) : '';
   
+  // Ensure arrays are always arrays, never null
+  const genres = Array.isArray(movieData.genres) ? movieData.genres : [];
+  const director = Array.isArray(movieData.director) ? movieData.director : [];
+  const writer = Array.isArray(movieData.writer) ? movieData.writer : [];
+  const cast = Array.isArray(movieData.cast) ? movieData.cast : [];
+  const productionCompanies = Array.isArray(movieData.productionCompanies) ? movieData.productionCompanies : null;
+  const spokenLanguages = Array.isArray(movieData.spokenLanguages) ? movieData.spokenLanguages : null;
+  
+  // Ensure description is meaningful
+  let description = movieData.description;
+  if (!description && displayName) {
+    const langStr = movieData.languages && Array.isArray(movieData.languages) && movieData.languages.length > 0
+      ? movieData.languages.join(', ')
+      : '';
+    description = langStr ? `${displayName} - ${langStr}` : displayName;
+  }
+  
   return {
-    id: movieData.id,
+    id: movieData.id || '',
     type: 'movie',
-    name: displayName || movieData.id, // Fallback to ID if name is empty
+    name: displayName || movieData.id || '',
     poster: movieData.poster || null,
     posterShape: 'regular',
     background: movieData.background || null,
     logo: movieData.logo || null,
-    description: movieData.description || `${displayName} - ${movieData.languages ? movieData.languages.join(', ') : ''}`,
+    description: description || null,
     releaseInfo: movieData.releaseInfo || null,
     released: movieData.released || null, // ISO 8601 date
     imdbRating: movieData.imdbRating || null,
-    genres: movieData.genres || [],
-    director: movieData.director || [],
-    writer: movieData.writer || [],
-    cast: movieData.cast || [],
+    genres: genres,
+    director: director,
+    writer: writer,
+    cast: cast,
     runtime: movieData.runtime || null,
-    language: movieData.languages ? movieData.languages.join(', ') : null,
+    language: movieData.languages && Array.isArray(movieData.languages) && movieData.languages.length > 0
+      ? movieData.languages.join(', ')
+      : null,
     originalLanguage: movieData.originalLanguage || null,
     country: movieData.country || null,
     tagline: movieData.tagline || null,
     trailers: movieData.trailers || null,
     popularity: movieData.popularity || null,
     voteCount: movieData.voteCount || null,
-    productionCompanies: movieData.productionCompanies || null,
-    spokenLanguages: movieData.spokenLanguages || null,
+    productionCompanies: productionCompanies,
+    spokenLanguages: spokenLanguages,
     website: movieData.url || movieData.website || null
   };
 }
@@ -320,16 +353,39 @@ function structureSeriesForCatalog(seriesData) {
   const title = seriesData.tmdbName || seriesData.name || seriesData.title || '';
   const displayName = title ? (seriesData.tmdbName ? title : cleanTitleForDisplay(title)) : '';
   
+  // Ensure arrays are always arrays, never null
+  const genres = Array.isArray(seriesData.genres) ? seriesData.genres : [];
+  const director = Array.isArray(seriesData.director) ? seriesData.director : [];
+  const cast = Array.isArray(seriesData.cast) ? seriesData.cast : [];
+  
+  // Ensure description is meaningful
+  let description = seriesData.description;
+  if (!description && displayName) {
+    const seasonStr = seriesData.season ? `Season ${seriesData.season}` : '';
+    const langStr = seriesData.languages && Array.isArray(seriesData.languages) && seriesData.languages.length > 0
+      ? seriesData.languages.join(', ')
+      : '';
+    if (seasonStr && langStr) {
+      description = `${displayName} - ${seasonStr} (${langStr})`;
+    } else if (seasonStr) {
+      description = `${displayName} - ${seasonStr}`;
+    } else if (langStr) {
+      description = `${displayName} - ${langStr}`;
+    } else {
+      description = displayName;
+    }
+  }
+  
   return {
-    id: seriesData.id,
+    id: seriesData.id || '',
     type: 'series',
-    name: displayName || seriesData.id, // Fallback to ID if name is empty
+    name: displayName || seriesData.id || '',
     poster: seriesData.poster || null,
-    description: seriesData.description || `${displayName} - Season ${seriesData.season} (${seriesData.languages ? seriesData.languages.join(', ') : ''})`,
-    genres: seriesData.genres || [],
+    description: description || null,
+    genres: genres,
     releaseInfo: seriesData.releaseInfo || null,
-    director: seriesData.director || [],
-    cast: seriesData.cast || [],
+    director: director,
+    cast: cast,
     imdbRating: seriesData.imdbRating || null,
     background: seriesData.background || null,
     logo: seriesData.logo || null,
@@ -364,32 +420,60 @@ function structureSeriesForMeta(seriesData) {
   const title = seriesData.tmdbName || seriesData.name || seriesData.title || '';
   const displayName = title ? (seriesData.tmdbName ? title : cleanTitleForDisplay(title)) : '';
   
+  // Ensure arrays are always arrays, never null
+  const genres = Array.isArray(seriesData.genres) ? seriesData.genres : [];
+  const director = Array.isArray(seriesData.director) ? seriesData.director : [];
+  const writer = Array.isArray(seriesData.writer) ? seriesData.writer : [];
+  const cast = Array.isArray(seriesData.cast) ? seriesData.cast : [];
+  const productionCompanies = Array.isArray(seriesData.productionCompanies) ? seriesData.productionCompanies : null;
+  const spokenLanguages = Array.isArray(seriesData.spokenLanguages) ? seriesData.spokenLanguages : null;
+  
+  // Ensure description is meaningful
+  let description = seriesData.description;
+  if (!description && displayName) {
+    const seasonStr = seriesData.season ? `Season ${seriesData.season}` : '';
+    const langStr = seriesData.languages && Array.isArray(seriesData.languages) && seriesData.languages.length > 0
+      ? seriesData.languages.join(', ')
+      : '';
+    if (seasonStr && langStr) {
+      description = `${displayName} - ${seasonStr} (${langStr})`;
+    } else if (seasonStr) {
+      description = `${displayName} - ${seasonStr}`;
+    } else if (langStr) {
+      description = `${displayName} - ${langStr}`;
+    } else {
+      description = displayName;
+    }
+  }
+  
   return {
-    id: seriesData.id,
+    id: seriesData.id || '',
     type: 'series',
-    name: displayName || seriesData.id, // Fallback to ID if name is empty
+    name: displayName || seriesData.id || '',
     poster: seriesData.poster || null,
     posterShape: 'regular',
     background: seriesData.background || null,
     logo: seriesData.logo || null,
-    description: seriesData.description || `${displayName} - Season ${seriesData.season} (${seriesData.languages ? seriesData.languages.join(', ') : ''})`,
+    description: description || null,
     releaseInfo: seriesData.releaseInfo || null,
     released: seriesData.released || null, // ISO 8601 date
     imdbRating: seriesData.imdbRating || null,
-    genres: seriesData.genres || [],
-    director: seriesData.director || [],
-    writer: seriesData.writer || [],
-    cast: seriesData.cast || [],
+    genres: genres,
+    director: director,
+    writer: writer,
+    cast: cast,
     runtime: seriesData.runtime || null,
-    language: seriesData.languages ? seriesData.languages.join(', ') : null,
+    language: seriesData.languages && Array.isArray(seriesData.languages) && seriesData.languages.length > 0
+      ? seriesData.languages.join(', ')
+      : null,
     originalLanguage: seriesData.originalLanguage || null,
     country: seriesData.country || null,
     tagline: seriesData.tagline || null,
     trailers: seriesData.trailers || null,
     popularity: seriesData.popularity || null,
     voteCount: seriesData.voteCount || null,
-    productionCompanies: seriesData.productionCompanies || null,
-    spokenLanguages: seriesData.spokenLanguages || null,
+    productionCompanies: productionCompanies,
+    spokenLanguages: spokenLanguages,
     website: seriesData.url || seriesData.website || null,
     seasons: seasons
   };
@@ -427,8 +511,20 @@ function cleanTitleForDisplay(title) {
     .replace(/\s+/g, ' ')
     .trim();
   
+  // Remove episode info from series titles (before year/language removal)
+  let nameOnly = cleaned.replace(/\s*S\d+\s*EP?\s*\([^)]*\)/gi, '');
+  nameOnly = nameOnly.replace(/\s*EP?\s*\([^)]*\)/gi, '');
+  nameOnly = nameOnly.replace(/\s*S\d+\s*EP?/gi, '');
+  
+  // Remove "HD +" and similar patterns
+  nameOnly = nameOnly.replace(/\s*\(HD\s*\+\s*\)/gi, '');
+  nameOnly = nameOnly.replace(/\s*HD\s*\+/gi, '');
+  
+  // Remove "Clean Audio" suffix (if not already removed)
+  nameOnly = nameOnly.replace(/\s*-\s*Clean\s+Audio\s*$/gi, '');
+  
   // Remove year completely (no extraction, no re-addition)
-  let nameOnly = cleaned.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
+  nameOnly = nameOnly.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
   nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();
   
   // Remove language names (check anywhere in title, not just end)

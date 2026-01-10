@@ -139,24 +139,24 @@ class TamilMVScraper {
         // Pre-check: Try to detect if this content is already cached (skip if skipCacheCheck is true)
         let alreadyCached = false;
         if (!skipCacheCheck) {
-          // Detect languages and series info from listing title
-          const preDetectedLanguages = detectLanguagesFromTitle(listing.title);
-          const preSeriesInfo = detectSeriesFromTitle(listing.title);
-          
-          if (preDetectedLanguages.length > 0) {
-            if (preSeriesInfo.isSeries) {
-              // Check if series exists in cache
-              const potentialSeriesId = generateSeriesId(listing.title, preSeriesInfo.season, preDetectedLanguages);
-              alreadyCached = await fileCache.hasMovie(potentialSeriesId); // Series are stored in moviesDir
-              if (alreadyCached) {
-                logger.debug(`Skipping cached series: ${listing.title.substring(0, 50)}... (ID: ${potentialSeriesId})`);
-              }
-            } else {
-              // Check if movie exists in cache
-              const potentialMovieId = generateMovieId(listing.title, preDetectedLanguages);
-              alreadyCached = await fileCache.hasMovie(potentialMovieId);
-              if (alreadyCached) {
-                logger.debug(`Skipping cached movie: ${listing.title.substring(0, 50)}... (ID: ${potentialMovieId})`);
+        // Detect languages and series info from listing title
+        const preDetectedLanguages = detectLanguagesFromTitle(listing.title);
+        const preSeriesInfo = detectSeriesFromTitle(listing.title);
+        
+        if (preDetectedLanguages.length > 0) {
+          if (preSeriesInfo.isSeries) {
+            // Check if series exists in cache
+            const potentialSeriesId = generateSeriesId(listing.title, preSeriesInfo.season, preDetectedLanguages);
+            alreadyCached = await fileCache.hasMovie(potentialSeriesId); // Series are stored in moviesDir
+            if (alreadyCached) {
+              logger.debug(`Skipping cached series: ${listing.title.substring(0, 50)}... (ID: ${potentialSeriesId})`);
+            }
+          } else {
+            // Check if movie exists in cache
+            const potentialMovieId = generateMovieId(listing.title, preDetectedLanguages);
+            alreadyCached = await fileCache.hasMovie(potentialMovieId);
+            if (alreadyCached) {
+              logger.debug(`Skipping cached movie: ${listing.title.substring(0, 50)}... (ID: ${potentialMovieId})`);
               }
             }
           }
@@ -469,6 +469,7 @@ class TamilMVScraper {
           }
         }
 
+        logger.info(`TMDB Enrichment Summary: ${successCount} successful, ${failCount} failed out of ${movies.length} movies`);
         logger.success(`TMDB enrichment completed: ${successCount} successful, ${failCount} failed`);
       } else {
         // No movies matched, keep originals
@@ -480,8 +481,233 @@ class TamilMVScraper {
       logger.warn('Continuing with unenriched data');
       // Don't throw - continue with original data
     }
+
+    // Enrich series if available
+    if (this.tmdbClient && Object.keys(result.series).length > 0) {
+      logger.info('Starting Series TMDB enrichment...');
+      await this.enrichSeriesWithTMDB(result);
+    }
   }
 
+  /**
+   * Phase 2b: Batch enrich all series with TMDB metadata
+   * @param {Object} result - Scraped data result object
+   */
+  async enrichSeriesWithTMDB(result) {
+    if (!this.tmdbClient) {
+      logger.warn('TMDB client not available, skipping series enrichment');
+      return;
+    }
+
+    try {
+      const series = Object.values(result.series);
+      const seriesIds = Object.keys(result.series);
+      
+      if (series.length === 0) {
+        logger.debug('No series to enrich with TMDB');
+        return;
+      }
+
+      logger.info(`Enriching ${series.length} series with TMDB metadata...`);
+
+      // Step 1: Prepare all series for TMDB search with variations
+      const searchPromises = series.map((seriesData, index) => {
+        const seriesId = seriesIds[index];
+        // Get title from seriesData - it might be in 'name' (from structureSeriesForMeta) or 'title' (from contentData)
+        const title = seriesData.name || seriesData.title || '';
+        
+        // Clean title for TMDB search (this also extracts year)
+        const { cleanTitle, year: extractedYear } = cleanTitleForTMDB(title);
+        // Use year from seriesData if available, otherwise use extracted year
+        const searchYear = seriesData.year || extractedYear;
+
+        // Use searchTVWithVariations for better matching
+        return this.tmdbClient.searchTVWithVariations(cleanTitle, searchYear)
+          .then(searchResults => ({
+            seriesId,
+            seriesData,
+            searchResults,
+            cleanTitle,
+            searchYear,
+            originalTitle: title
+          }))
+          .catch(error => {
+            logger.debug(`TMDB TV search failed for "${cleanTitle}":`, error.message);
+            return { seriesId, seriesData, searchResults: null, cleanTitle, searchYear, originalTitle: title };
+          });
+      });
+
+      // Step 2: Batch search TMDB (all in parallel)
+      logger.debug('Batch searching TMDB for all series...');
+      const searchResults = await Promise.allSettled(searchPromises);
+      
+      // Step 3: Find best matches and prepare detail fetches
+      const detailPromises = [];
+      const enrichedSeries = {};
+
+      searchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const { seriesId, seriesData, searchResults: tmdbResults, cleanTitle, searchYear, originalTitle } = result.value;
+          
+          if (!tmdbResults || tmdbResults.length === 0) {
+            // No TMDB results, keep original series data
+            enrichedSeries[seriesId] = seriesData;
+            return;
+          }
+
+          // Find best match (use originalTitle if available, otherwise cleanTitle)
+          const titleForMatching = originalTitle || cleanTitle;
+          const bestMatch = this.tmdbClient.findBestTVMatch(tmdbResults, titleForMatching, searchYear);
+          
+          if (!bestMatch || !bestMatch.id) {
+            // No good match, keep original
+            enrichedSeries[seriesId] = seriesData;
+            return;
+          }
+
+          // Fetch TV series details
+          detailPromises.push(
+            this.tmdbClient.getTVDetails(bestMatch.id)
+              .then(tmdbDetails => ({
+                seriesId,
+                seriesData,
+                tmdbDetails,
+                tmdbId: bestMatch.id
+              }))
+              .catch(error => {
+                logger.debug(`TMDB TV details fetch failed for ID ${bestMatch.id}:`, error.message);
+                return { seriesId, seriesData, tmdbDetails: null, tmdbId: bestMatch.id };
+              })
+          );
+        } else {
+          // Search failed, keep original
+          const seriesId = seriesIds[index];
+          enrichedSeries[seriesId] = series[index];
+        }
+      });
+
+      // Step 4: Batch fetch details (all in parallel)
+      if (detailPromises.length > 0) {
+        logger.debug(`Fetching TMDB details for ${detailPromises.length} series...`);
+        const detailResults = await Promise.allSettled(detailPromises);
+
+        // Step 5: Enrich all series with TMDB data
+        let successCount = 0;
+        let failCount = 0;
+
+        detailResults.forEach(result => {
+          if (result.status === 'fulfilled') {
+            const { seriesId, seriesData, tmdbDetails, tmdbId } = result.value;
+            
+            if (!tmdbDetails) {
+              // Details fetch failed, keep original
+              enrichedSeries[seriesId] = seriesData;
+              failCount++;
+              return;
+            }
+
+            // Extract metadata from TMDB
+            const tmdbMetadata = this.tmdbClient.extractTVMetadata(tmdbDetails);
+            
+            if (tmdbMetadata) {
+              // Merge TMDB metadata with existing series data
+              const enriched = {
+                ...seriesData,
+                poster: tmdbMetadata.poster || seriesData.poster,
+                background: tmdbMetadata.background || seriesData.background,
+                genres: tmdbMetadata.genres.length > 0 ? tmdbMetadata.genres : seriesData.genres,
+                imdbRating: tmdbMetadata.imdbRating || seriesData.imdbRating,
+                description: tmdbMetadata.description || seriesData.description,
+                cast: tmdbMetadata.cast.length > 0 ? tmdbMetadata.cast : seriesData.cast,
+                director: tmdbMetadata.director.length > 0 ? tmdbMetadata.director : seriesData.director,
+                runtime: tmdbMetadata.runtime || seriesData.runtime,
+                releaseInfo: tmdbMetadata.releaseInfo || seriesData.releaseInfo,
+                tmdbId: tmdbMetadata.tmdbId,
+                tmdbName: tmdbMetadata.tmdbName || null, // Store TMDB name for prioritization
+                // New enriched fields
+                released: tmdbMetadata.released || seriesData.released,
+                tagline: tmdbMetadata.tagline || seriesData.tagline,
+                country: tmdbMetadata.country || seriesData.country,
+                writer: tmdbMetadata.writer || seriesData.writer,
+                trailers: tmdbMetadata.trailers || seriesData.trailers,
+                popularity: tmdbMetadata.popularity || seriesData.popularity,
+                voteCount: tmdbMetadata.voteCount || seriesData.voteCount,
+                productionCompanies: tmdbMetadata.productionCompanies || seriesData.productionCompanies,
+                spokenLanguages: tmdbMetadata.spokenLanguages || seriesData.spokenLanguages,
+                originalLanguage: tmdbMetadata.originalLanguage || seriesData.originalLanguage,
+                website: tmdbMetadata.website || seriesData.website || seriesData.url
+              };
+
+              enrichedSeries[seriesId] = enriched;
+              successCount++;
+            } else {
+              enrichedSeries[seriesId] = seriesData;
+              failCount++;
+            }
+          } else {
+            // Details fetch failed, keep original
+            const seriesId = result.value?.seriesId || seriesIds[detailResults.indexOf(result)];
+            enrichedSeries[seriesId] = series.find(s => s.id === seriesId) || series[detailResults.indexOf(result)];
+            failCount++;
+          }
+        });
+
+        // Update result.series with enriched versions
+        result.series = enrichedSeries;
+
+        // Update catalog entries with enriched metadata
+        const { structureSeriesForCatalog } = require('./extractors');
+        for (const [lang, catalogItems] of Object.entries(result.catalogs)) {
+          for (let i = 0; i < catalogItems.length; i++) {
+            const catalogItem = catalogItems[i];
+            if (catalogItem.type === 'series' && enrichedSeries[catalogItem.id]) {
+              const enriched = enrichedSeries[catalogItem.id];
+              catalogItems[i] = structureSeriesForCatalog(enriched);
+            }
+          }
+        }
+
+        logger.info(`TMDB Series Enrichment Summary: ${successCount} successful, ${failCount} failed out of ${series.length} series`);
+        logger.success(`TMDB series enrichment completed: ${successCount} successful, ${failCount} failed`);
+      } else {
+        // No series matched, keep originals
+        result.series = enrichedSeries;
+        logger.warn('No TMDB matches found for any series');
+      }
+    } catch (error) {
+      logger.error('Error during TMDB series enrichment:', error.message);
+      logger.warn('Continuing with unenriched series data');
+      // Don't throw - continue with original data
+    }
+  }
+
+  /**
+   * Clean description by removing promotional text and technical specifications
+   * @param {string} rawDescription - Raw description from scraped page
+   * @returns {string|null} - Cleaned description or null
+   */
+  cleanDescription(rawDescription) {
+    if (!rawDescription) return null;
+    
+    // Remove TamilMV promotional text and technical info
+    let cleaned = rawDescription
+      .replace(/TamilMV Official Telegram Channel[^\n]*/gi, '')
+      .replace(/Click Here/gi, '')
+      .replace(/www\.1TamilMV\.[^\s]+/gi, '')
+      .replace(/MAGNET[\s\n]*DIRECT LINK/gi, '')
+      .replace(/\.torrent/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // Remove technical specifications (quality, codec, size)
+    cleaned = cleaned.replace(/\b(\d+p|\d+K|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|AAC|DD\+[\d\.]+|Kbps|\d+\.?\d*\s*(GB|MB))\b/gi, '');
+    
+    // Extract first meaningful sentence (50+ chars, not starting with number)
+    const sentences = cleaned.split(/[.!?]\s+/);
+    const meaningful = sentences.find(s => s.length > 50 && !s.match(/^\d/));
+    
+    return meaningful ? meaningful.substring(0, 500) : cleaned.substring(0, 500) || null;
+  }
 
   /**
    * Scrape content details (movie or series) including magnet links
@@ -564,7 +790,7 @@ class TamilMVScraper {
         originalTitle: extractedTitle, // Keep original for language/series detection
         url: contentUrl,
         year: year,
-        description: $('.ipsType_richText, .post-content').first().text().trim().substring(0, 500) || null,
+        description: this.cleanDescription($('.ipsType_richText, .post-content').first().text().trim()) || null,
         streams: streams,
         qualities: qualities.length > 0 ? qualities : ['1080p']
       };
