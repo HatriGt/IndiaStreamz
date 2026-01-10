@@ -604,6 +604,40 @@ function detectSeriesFromTitle(title) {
 }
 
 /**
+ * Extract episode range from description text (fallback method)
+ * Looks for patterns like "S01 EP (65-68)" in description
+ * @param {string} description - Description text to search
+ * @returns {Object|null} - { season: number, episodes: number[] } or null
+ */
+function extractEpisodeRangeFromDescription(description) {
+  if (!description) return null;
+  
+  // Pattern: S01 EP (65-68) or S02 EP 04
+  const seasonMatch = description.match(/S(\d+)/i);
+  const episodeRangeMatch = description.match(/EP\s*\(?\s*(\d+)\s*-\s*(\d+)\s*\)?/i);
+  const singleEpisodeMatch = description.match(/EP\s*\(?\s*(\d+)\s*\)?/i);
+  
+  if (seasonMatch && (episodeRangeMatch || singleEpisodeMatch)) {
+    const season = parseInt(seasonMatch[1], 10);
+    let episodes = [];
+    
+    if (episodeRangeMatch) {
+      const start = parseInt(episodeRangeMatch[1], 10);
+      const end = parseInt(episodeRangeMatch[2], 10);
+      for (let ep = start; ep <= end; ep++) {
+        episodes.push(ep);
+      }
+    } else if (singleEpisodeMatch) {
+      episodes.push(parseInt(singleEpisodeMatch[1], 10));
+    }
+    
+    return { season, episodes };
+  }
+  
+  return null;
+}
+
+/**
  * Extract quality from magnet link description text
  */
 function extractQualityFromMagnetText(text) {
@@ -635,6 +669,7 @@ module.exports = {
   extractMovieTitle,
   detectLanguagesFromTitle,
   detectSeriesFromTitle,
+  extractEpisodeRangeFromDescription,
   extractQualityFromMagnetText
 };
 

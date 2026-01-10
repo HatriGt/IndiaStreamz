@@ -523,6 +523,21 @@ function cleanTitleForDisplay(title) {
   // Remove "Clean Audio" suffix (if not already removed)
   nameOnly = nameOnly.replace(/\s*-\s*Clean\s+Audio\s*$/gi, '');
   
+  // Remove file size patterns: "- 800MB & 400MB]", "- 3GB - 1.2GB & 600MB]"
+  // Pattern 1: Simple size with optional second size: "- 800MB & 400MB]"
+  nameOnly = nameOnly.replace(/\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '');
+  // Pattern 2: Multiple sizes: "- 3GB - 1.2GB & 600MB]"
+  nameOnly = nameOnly.replace(/\s*-\s*\d+\.?\d*\s*(GB|MB)\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '');
+  // Pattern 3: Episode number with file size: "01 - 800MB & 400MB]"
+  nameOnly = nameOnly.replace(/\s*\d+\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '');
+  // Remove trailing brackets
+  nameOnly = nameOnly.replace(/\s*\]\s*$/, '').trim();
+  
+  // Remove empty parentheses and day numbers (for "BIGG BOSS ()91 DAY 90")
+  nameOnly = nameOnly.replace(/\s*\(\)\s*/g, ' '); // Remove empty parentheses
+  nameOnly = nameOnly.replace(/\s*DAY\s+\d+\s*$/gi, ''); // Remove "DAY 90" at end
+  nameOnly = nameOnly.replace(/\s*\(\d+\)\s*DAY\s+\d+\s*$/gi, ''); // Remove "(91) DAY 90"
+  
   // Remove year completely (no extraction, no re-addition)
   nameOnly = nameOnly.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
   nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();

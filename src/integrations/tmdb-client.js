@@ -226,10 +226,21 @@ class TMDBClient {
     const variations = new Set([title]); // Start with original
     
     // Remove season/episode info (e.g., "S01 EP (01-06)", "S02 EP(01-04)")
+    // Enhanced: Also remove day numbers, empty parentheses, version numbers, and file sizes
     let baseTitle = title
       .replace(/\s*S\d+\s*EP?\s*\([^)]*\)/gi, '')
       .replace(/\s*EP?\s*\([^)]*\)/gi, '')
-      .replace(/\s*S\d+\s*EP?/gi, '')
+      .replace(/\s*S\d+\s*EP?\s*\d+/gi, '')
+      .replace(/\s*EP?\s*\d+/gi, '')
+      .replace(/\s*DAY\s+\d+/gi, '')
+      .replace(/\s*\(\)\s*/g, ' ')
+      // Remove version numbers (V2, V3, etc.)
+      .replace(/\s*V\d+\s*/gi, ' ')
+      // Remove file size patterns: "- 800MB & 400MB]", "- 3GB - 1.2GB & 600MB]"
+      .replace(/\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '')
+      .replace(/\s*-\s*\d+\.?\d*\s*(GB|MB)\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '')
+      .replace(/\s*\d+\s*-\s*\d+\.?\d*\s*(GB|MB)\s*(&\s*\d+\.?\d*\s*(GB|MB))?\s*\]?/gi, '')
+      .replace(/\s*\]\s*$/, '')
       .trim();
     
     if (baseTitle && baseTitle !== title) {
@@ -263,6 +274,19 @@ class TMDBClient {
     const withoutParentheses = baseTitle.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
     if (withoutParentheses && withoutParentheses !== baseTitle) {
       variations.add(withoutParentheses);
+    }
+    
+    // Remove technical terms more aggressively
+    const technicalTerms = ['TRUE', 'WEB-DL', 'HDRip', 'PreDVD', 'HQ', 'UHD', 'ESub', 'HC-ESub', 
+                           'Org Auds', 'Original Audios', 'HQ Clean Audio', 'HQ Clean Audios', 
+                           'Clean Audio', 'AVC', 'HEVC', 'x264', 'UNTOUCHED', 'ATMOS', 'BluRay', 'BR-Rip'];
+    let cleanedTitle = baseTitle;
+    for (const term of technicalTerms) {
+      const regex = new RegExp(`\\s*${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'gi');
+      cleanedTitle = cleanedTitle.replace(regex, ' ').trim();
+    }
+    if (cleanedTitle && cleanedTitle !== baseTitle) {
+      variations.add(cleanedTitle);
     }
     
     // Remove trailing dashes and clean
@@ -711,9 +735,9 @@ class TMDBClient {
     // Sort by score (highest first)
     scoredResults.sort((a, b) => b.score - a.score);
 
-    // Lower threshold from 30 to 20 for better matching
+    // Lower threshold to 15 for better series matching
     const bestMatch = scoredResults[0];
-    if (bestMatch && bestMatch.score >= 20) {
+    if (bestMatch && bestMatch.score >= 15) {
       logger.debug(`TMDB TV match found: "${originalTitle}" -> "${bestMatch.result.name}" (score: ${bestMatch.score.toFixed(1)})`);
       return bestMatch.result;
     }

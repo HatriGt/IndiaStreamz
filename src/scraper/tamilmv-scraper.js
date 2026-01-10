@@ -10,6 +10,7 @@ const {
   extractMovieTitle,
   detectLanguagesFromTitle,
   detectSeriesFromTitle,
+  extractEpisodeRangeFromDescription,
   extractQualityFromMagnetText
 } = require('./parsers');
 const {
@@ -194,6 +195,47 @@ class TamilMVScraper {
         const seriesInfo = detectSeriesFromTitle(titleForDetection);
         
         if (seriesInfo.isSeries) {
+          // Re-detect from detail page title to get accurate episode info
+          // The detail page title may have more accurate episode ranges than listing title
+          const detailPageTitle = contentData.originalTitle || contentData.title;
+          const detailSeriesInfo = detectSeriesFromTitle(detailPageTitle);
+          
+          // If detail page has episode info, use it (more accurate)
+          if (detailSeriesInfo.isSeries && detailSeriesInfo.episodes.length > 0) {
+            // Validate and update episode info
+            if (detailSeriesInfo.season === seriesInfo.season) {
+              // Same season, update episodes if different
+              if (seriesInfo.episodes.length !== detailSeriesInfo.episodes.length ||
+                  JSON.stringify(seriesInfo.episodes) !== JSON.stringify(detailSeriesInfo.episodes)) {
+                logger.warn(`Episode range mismatch for ${contentData.title}: listing=${seriesInfo.episodes.join(',')}, detail=${detailSeriesInfo.episodes.join(',')} - using detail page info`);
+                seriesInfo.episodes = detailSeriesInfo.episodes;
+              }
+            } else {
+              // Season mismatch - use detail page info
+              logger.warn(`Season mismatch for ${contentData.title}: listing=S${seriesInfo.season}, detail=S${detailSeriesInfo.season} - using detail page info`);
+              seriesInfo.season = detailSeriesInfo.season;
+              seriesInfo.episodes = detailSeriesInfo.episodes;
+            }
+          } else if (contentData.description) {
+            // Fallback: Try to extract episode info from description
+            const descEpisodeInfo = extractEpisodeRangeFromDescription(contentData.description);
+            if (descEpisodeInfo && descEpisodeInfo.episodes.length > 0) {
+              if (descEpisodeInfo.season === seriesInfo.season) {
+                // Same season, update episodes if different
+                if (seriesInfo.episodes.length !== descEpisodeInfo.episodes.length ||
+                    JSON.stringify(seriesInfo.episodes) !== JSON.stringify(descEpisodeInfo.episodes)) {
+                  logger.warn(`Episode range mismatch for ${contentData.title}: title=${seriesInfo.episodes.join(',')}, description=${descEpisodeInfo.episodes.join(',')} - using description info`);
+                  seriesInfo.episodes = descEpisodeInfo.episodes;
+                }
+              } else {
+                // Season mismatch - use description info
+                logger.warn(`Season mismatch for ${contentData.title}: title=S${seriesInfo.season}, description=S${descEpisodeInfo.season} - using description info`);
+                seriesInfo.season = descEpisodeInfo.season;
+                seriesInfo.episodes = descEpisodeInfo.episodes;
+              }
+            }
+          }
+          
           // Handle series
           const seriesId = generateSeriesId(contentData.title, seriesInfo.season, detectedLanguages);
           
@@ -699,8 +741,22 @@ class TamilMVScraper {
       .replace(/\s+/g, ' ')
       .trim();
     
-    // Remove technical specifications (quality, codec, size)
-    cleaned = cleaned.replace(/\b(\d+p|\d+K|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|AAC|DD\+[\d\.]+|Kbps|\d+\.?\d*\s*(GB|MB))\b/gi, '');
+    // Remove "Note:" prefixes and what follows until next sentence
+    cleaned = cleaned.replace(/^Note:\s*[^.!?]+[.!?]\s*/gi, '');
+    cleaned = cleaned.replace(/\s+Note:\s*[^.!?]+[.!?]\s*/gi, ' ');
+    
+    // Remove "EP XX TO XX AVAILABLE -> HERE" patterns
+    cleaned = cleaned.replace(/EP\s*\d+\s+TO\s+\d+\s+AVAILABLE[^\n]*/gi, '');
+    
+    // Remove technical specifications (quality, codec, size) - enhanced with more terms
+    cleaned = cleaned.replace(/\b(\d+p|\d+K|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|AAC|DD\+[\d\.]+|Kbps|\d+\.?\d*\s*(GB|MB)|TRUE|SDR|AVC|HEVC|x264|UNTOUCHED|ATMOS|BluRay|BR-Rip|MAGNET|\.mkv)\b/gi, '');
+    
+    // Remove bracketed content (often technical specs)
+    cleaned = cleaned.replace(/\[[^\]]*\]/g, '');
+    
+    // Remove repeated dashes and spaces
+    cleaned = cleaned.replace(/\s*-\s*-\s*/g, ' ');
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
     
     // Extract first meaningful sentence (50+ chars, not starting with number)
     const sentences = cleaned.split(/[.!?]\s+/);
