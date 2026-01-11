@@ -9,6 +9,13 @@ class FileCache {
     this.catalogsDir = constants.CACHE_CATALOGS_DIR;
     this.moviesDir = constants.CACHE_MOVIES_DIR;
     this.streamsDir = constants.CACHE_STREAMS_DIR;
+    
+    // In-memory cache for catalogs, movies, and streams
+    // Structure: Map<key, { data, mtime }>
+    this.catalogCache = new Map(); // language -> { data, mtime }
+    this.movieCache = new Map(); // movieId -> { data, mtime }
+    this.streamCache = new Map(); // contentId -> { data, mtime }
+    
     this.ensureDirectories();
   }
 
@@ -23,13 +30,45 @@ class FileCache {
   }
 
   /**
-   * Get catalog for a language
+   * Get catalog for a language (with in-memory caching)
    */
   async getCatalog(language) {
     try {
       const filePath = path.join(this.catalogsDir, `${language}.json`);
+      
+      // Check if we have it in cache
+      const cached = this.catalogCache.get(language);
+      if (cached) {
+        try {
+          // Check file modification time to see if cache is still valid
+          const stats = await fs.stat(filePath);
+          if (stats.mtimeMs === cached.mtime) {
+            // Cache is valid, return cached data
+            return cached.data;
+          }
+          // File was modified, need to reload
+        } catch (error) {
+          // File might not exist, but we have cache - return it anyway
+          if (error.code === 'ENOENT') {
+            return cached.data;
+          }
+        }
+      }
+      
+      // Load from disk
       const data = await fs.readFile(filePath, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      
+      // Get file stats for cache invalidation
+      const stats = await fs.stat(filePath);
+      
+      // Update cache
+      this.catalogCache.set(language, {
+        data: parsed,
+        mtime: stats.mtimeMs
+      });
+      
+      return parsed;
     } catch (error) {
       if (error.code === 'ENOENT') {
         return null;
@@ -40,13 +79,38 @@ class FileCache {
   }
 
   /**
-   * Get movie metadata
+   * Get movie metadata (with in-memory caching)
    */
   async getMovie(movieId) {
     try {
       const filePath = path.join(this.moviesDir, `${movieId}.json`);
+      
+      // Check cache
+      const cached = this.movieCache.get(movieId);
+      if (cached) {
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.mtimeMs === cached.mtime) {
+            return cached.data;
+          }
+        } catch (error) {
+          if (error.code === 'ENOENT' && cached) {
+            return cached.data;
+          }
+        }
+      }
+      
+      // Load from disk
       const data = await fs.readFile(filePath, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      
+      const stats = await fs.stat(filePath);
+      this.movieCache.set(movieId, {
+        data: parsed,
+        mtime: stats.mtimeMs
+      });
+      
+      return parsed;
     } catch (error) {
       if (error.code === 'ENOENT') {
         return null;
@@ -57,13 +121,47 @@ class FileCache {
   }
 
   /**
-   * Get streams for a movie
+   * Get series metadata (with in-memory caching)
+   * Series are stored in the movies directory
+   */
+  async getSeries(seriesId) {
+    // Series are stored in the movies directory, so use getMovie
+    return this.getMovie(seriesId);
+  }
+
+  /**
+   * Get streams for a movie (with in-memory caching)
    */
   async getStreams(movieId) {
     try {
       const filePath = path.join(this.streamsDir, `${movieId}.json`);
+      
+      // Check cache
+      const cached = this.streamCache.get(movieId);
+      if (cached) {
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.mtimeMs === cached.mtime) {
+            return cached.data;
+          }
+        } catch (error) {
+          if (error.code === 'ENOENT' && cached) {
+            return cached.data;
+          }
+        }
+      }
+      
+      // Load from disk
       const data = await fs.readFile(filePath, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      
+      const stats = await fs.stat(filePath);
+      this.streamCache.set(movieId, {
+        data: parsed,
+        mtime: stats.mtimeMs
+      });
+      
+      return parsed;
     } catch (error) {
       if (error.code === 'ENOENT') {
         return null;
@@ -100,6 +198,30 @@ class FileCache {
   }
 
   /**
+   * Clear in-memory cache for a specific language catalog
+   */
+  clearCatalogCache(language) {
+    this.catalogCache.delete(language);
+  }
+
+  /**
+   * Clear in-memory cache for a specific movie
+   */
+  clearMovieCache(movieId) {
+    this.movieCache.delete(movieId);
+    this.streamCache.delete(movieId);
+  }
+
+  /**
+   * Clear all in-memory caches
+   */
+  clearAllCaches() {
+    this.catalogCache.clear();
+    this.movieCache.clear();
+    this.streamCache.clear();
+  }
+
+  /**
    * Atomic write all cache data
    * Structure: { catalogs: { language: [...content] }, movies: { id: {...} }, series: { id: {...} }, streams: { id: [...] } }
    */
@@ -122,7 +244,7 @@ class FileCache {
           
           await fs.writeFile(tempPath, JSON.stringify(content, null, 2), 'utf8');
           tempFiles.push(tempPath);
-          finalFiles.push({ temp: tempPath, final: finalPath });
+          finalFiles.push({ temp: tempPath, final: finalPath, language });
         }
       }
 
@@ -134,7 +256,7 @@ class FileCache {
           
           await fs.writeFile(tempPath, JSON.stringify(movieData, null, 2), 'utf8');
           tempFiles.push(tempPath);
-          finalFiles.push({ temp: tempPath, final: finalPath });
+          finalFiles.push({ temp: tempPath, final: finalPath, movieId });
         }
       }
 
@@ -146,7 +268,7 @@ class FileCache {
           
           await fs.writeFile(tempPath, JSON.stringify(seriesData, null, 2), 'utf8');
           tempFiles.push(tempPath);
-          finalFiles.push({ temp: tempPath, final: finalPath });
+          finalFiles.push({ temp: tempPath, final: finalPath, movieId: seriesId });
         }
       }
 
@@ -158,13 +280,24 @@ class FileCache {
           
           await fs.writeFile(tempPath, JSON.stringify(streamData, null, 2), 'utf8');
           tempFiles.push(tempPath);
-          finalFiles.push({ temp: tempPath, final: finalPath });
+          finalFiles.push({ temp: tempPath, final: finalPath, contentId });
         }
       }
 
-      // Atomically rename all temp files to final files
-      for (const { temp, final } of finalFiles) {
+      // Atomically rename all temp files to final files and invalidate cache
+      for (const { temp, final, language, movieId, contentId } of finalFiles) {
         await fs.rename(temp, final);
+        
+        // Invalidate cache for updated items
+        if (language) {
+          this.clearCatalogCache(language);
+        }
+        if (movieId) {
+          this.clearMovieCache(movieId);
+        }
+        if (contentId) {
+          this.streamCache.delete(contentId);
+        }
       }
 
       logger.success(`Cache updated: ${finalFiles.length} files written`);
@@ -270,6 +403,10 @@ class FileCache {
           }
         }
       }
+      
+      // Clear in-memory caches
+      this.clearAllCaches();
+      
       logger.info('Cache cleared');
       return true;
     } catch (error) {
