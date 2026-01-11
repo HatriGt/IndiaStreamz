@@ -386,8 +386,10 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 // Token-based routes for catalog and meta - directly call handlers
 app.get('/stremio/:token/:encrypted/catalog/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
+  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(req.query)}`);
   try {
     const catalogData = await catalogHandler({ type, id, extra: req.query });
+    logger.info(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
     res.json(catalogData);
   } catch (error) {
     logger.error('[CATALOG] Error getting catalog:', error);
@@ -526,6 +528,40 @@ app.get('/api/cache/full-replace', async (req, res) => {
 // Don't pass port - this only mounts routes, doesn't start a server
 serveHTTP(addonInterface, {
   app: app
+});
+
+// Add explicit standard catalog routes as fallback (serveHTTP should create these, but ensure they work)
+// These routes are needed for Stremio Discover/search functionality
+app.get('/catalog/:type/:id.json', async (req, res) => {
+  const { type, id } = req.params;
+  logger.info(`[STANDARD CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(req.query)}`);
+  try {
+    const catalogData = await catalogHandler({ type, id, extra: req.query });
+    logger.info(`[STANDARD CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
+    res.json(catalogData);
+  } catch (error) {
+    logger.error('[CATALOG] Error getting catalog:', error);
+    res.status(500).json({ error: 'Failed to get catalog' });
+  }
+});
+
+// Add explicit standard meta route as fallback
+app.get('/meta/:type/:id.json', async (req, res) => {
+  const { type, id } = req.params;
+  logger.info(`[STANDARD META] Request for ${type}/${id}`);
+  try {
+    const metaData = await metaHandler({ type, id });
+    res.json(metaData);
+  } catch (error) {
+    logger.error('[META] Error getting meta:', error);
+    res.status(500).json({ error: 'Failed to get meta' });
+  }
+});
+
+// Add explicit standard manifest route (for non-token installations)
+app.get('/manifest.json', (req, res) => {
+  logger.info('[STANDARD MANIFEST] Request for manifest.json');
+  res.json(manifest);
 });
 
 // Start our own HTTP server using Express app
