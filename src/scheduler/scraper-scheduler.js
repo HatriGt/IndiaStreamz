@@ -65,7 +65,11 @@ class ScraperScheduler {
     const startTime = Date.now();
 
     try {
-      logger.info('=== Starting scheduled scrape ===');
+      logger.info('=== Starting scheduled scrape (cache will be cleared first) ===');
+      
+      // Clear existing cache before scraping fresh data
+      logger.info('Clearing existing cache...');
+      await fileCache.clear();
       
       // Scrape all languages and movies
       const scrapedData = await this.scraper.scrapeAll();
@@ -84,31 +88,20 @@ class ScraperScheduler {
       const hasCatalogData = scrapedData.catalogs && Object.values(scrapedData.catalogs).some(catalog => Array.isArray(catalog) && catalog.length > 0);
       
       if (!hasNewData && !hasCatalogData) {
-        logger.warn('No new data scraped - all items were already cached. Existing cache preserved.');
-        // Don't throw error - this is normal when all items are already cached
-        // Just log and return without updating cache (finally block will reset isRunning)
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        logger.info(`Total scrape duration: ${duration}s`);
-        return;
+        logger.warn('No data scraped - cache will be empty');
       }
       
-      if (!hasCatalogData && hasNewData) {
-        logger.warn('New movies/series found but catalogs are empty - this should not happen');
-      }
-      
-      // If we have new data but no catalog data, still proceed (catalogs will be skipped in setAll)
-      // If we have catalog data, proceed to update cache
-
-      // Update cache atomically
+      // Update cache atomically (cache already cleared above)
       const success = await fileCache.setAll(scrapedData);
       
       if (success) {
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        const languageCount = Object.keys(scrapedData.catalogs).length;
-        const totalMovies = Object.keys(scrapedData.movies).length;
+        const languageCount = Object.keys(scrapedData.catalogs || {}).length;
+        const totalMovies = Object.keys(scrapedData.movies || {}).length;
+        const totalSeries = Object.keys(scrapedData.series || {}).length;
         
         logger.success(`=== Scrape completed successfully in ${duration}s ===`);
-        logger.info(`Languages: ${languageCount}, Total Movies: ${totalMovies}`);
+        logger.info(`Languages: ${languageCount}, Movies: ${totalMovies}, Series: ${totalSeries}`);
       } else {
         throw new Error('Failed to update cache');
       }
@@ -116,7 +109,7 @@ class ScraperScheduler {
       logger.error('=== Scrape failed ===');
       logger.error('Error details:', error.message);
       logger.error('Stack:', error.stack);
-      logger.warn('Keeping existing cache intact');
+      logger.warn('Cache has been cleared but update failed - cache will be empty until next successful scrape');
     } finally {
       this.isRunning = false;
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
