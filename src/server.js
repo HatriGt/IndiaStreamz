@@ -387,11 +387,23 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 
 // Token-based routes for catalog and meta - directly call handlers
 // IMPORTANT: Register these BEFORE serveHTTP so they take precedence
-app.get('/stremio/:token/:encrypted/catalog/:type/:id.json', async (req, res) => {
-  const { type, id } = req.params;
-  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(req.query)}`);
+// Handle catalog routes with flexible ID matching (to support search in path)
+app.get('/stremio/:token/:encrypted/catalog/:type/:id*.json', async (req, res) => {
+  let { type, id } = req.params;
+  
+  // Handle case where Stremio includes search in the path like: /catalog/movie/tamil/search=query.json
+  // Extract search parameter from id if present
+  let extra = { ...req.query };
+  const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
+  if (searchMatch) {
+    id = searchMatch[1]; // Extract the actual catalog ID
+    extra.search = decodeURIComponent(searchMatch[2]); // Extract and decode search term
+    logger.info(`[TOKEN CATALOG] Extracted search from path: "${extra.search}" for catalog ${id}`);
+  }
+  
+  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(extra)}`);
   try {
-    const catalogData = await catalogHandler({ type, id, extra: req.query });
+    const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
     res.json(catalogData);
   } catch (error) {
@@ -543,11 +555,23 @@ serveHTTP(addonInterface, {
 
 // Add explicit standard catalog routes as fallback (serveHTTP should create these, but ensure they work)
 // These routes are needed for Stremio Discover/search functionality
-app.get('/catalog/:type/:id.json', async (req, res) => {
-  const { type, id } = req.params;
-  logger.info(`[STANDARD CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(req.query)}`);
+// Handle catalog routes with flexible ID matching (to support search in path)
+app.get('/catalog/:type/:id*.json', async (req, res) => {
+  let { type, id } = req.params;
+  
+  // Handle case where Stremio includes search in the path like: /catalog/movie/tamil/search=query.json
+  // Extract search parameter from id if present
+  let extra = { ...req.query };
+  const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
+  if (searchMatch) {
+    id = searchMatch[1]; // Extract the actual catalog ID
+    extra.search = decodeURIComponent(searchMatch[2]); // Extract and decode search term
+    logger.info(`[STANDARD CATALOG] Extracted search from path: "${extra.search}" for catalog ${id}`);
+  }
+  
+  logger.info(`[STANDARD CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(extra)}`);
   try {
-    const catalogData = await catalogHandler({ type, id, extra: req.query });
+    const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[STANDARD CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
     res.json(catalogData);
   } catch (error) {
