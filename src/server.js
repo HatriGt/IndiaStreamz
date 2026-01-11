@@ -53,6 +53,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// Log all requests to debug routing issues
+app.use((req, res, next) => {
+  // Only log Stremio-related requests to avoid spam
+  if (req.path.includes('/catalog') || req.path.includes('/meta') || req.path.includes('/stream') || req.path.includes('/stremio') || req.path.includes('/manifest')) {
+    logger.info(`[REQUEST] ${req.method} ${req.path} - Query: ${JSON.stringify(req.query)}`);
+  }
+  next();
+});
+
 // IMPORTANT: Register custom routes BEFORE serveHTTP
 // These routes must be registered early to ensure they're not overridden
 
@@ -360,14 +369,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Create Stremio addon using addonBuilder
-// Note: streamHandler will access query params via the global storage set by middleware
-const addonInterface = addonBuilder(manifest)
-  .defineCatalogHandler(catalogHandler)
-  .defineMetaHandler(metaHandler)
-  .defineStreamHandler(streamHandler)
-  .getInterface();
-
+// Register token-based routes BEFORE serveHTTP to ensure they take precedence
 // Token-based manifest route - validates token and returns manifest
 app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   const { token } = req.params;
@@ -384,6 +386,7 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 });
 
 // Token-based routes for catalog and meta - directly call handlers
+// IMPORTANT: Register these BEFORE serveHTTP so they take precedence
 app.get('/stremio/:token/:encrypted/catalog/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
   logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(req.query)}`);
@@ -396,6 +399,14 @@ app.get('/stremio/:token/:encrypted/catalog/:type/:id.json', async (req, res) =>
     res.status(500).json({ error: 'Failed to get catalog' });
   }
 });
+
+// Create Stremio addon using addonBuilder
+// Note: streamHandler will access query params via the global storage set by middleware
+const addonInterface = addonBuilder(manifest)
+  .defineCatalogHandler(catalogHandler)
+  .defineMetaHandler(metaHandler)
+  .defineStreamHandler(streamHandler)
+  .getInterface();
 
 app.get('/stremio/:token/:encrypted/meta/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
@@ -564,6 +575,16 @@ app.get('/manifest.json', (req, res) => {
   res.json(manifest);
 });
 
+// 404 handler to catch unmatched requests and log them (must be last, before server starts)
+app.use((req, res) => {
+  // Only log Stremio-related 404s
+  if (req.path.includes('/catalog') || req.path.includes('/meta') || req.path.includes('/stream') || req.path.includes('/stremio') || req.path.includes('/manifest')) {
+    logger.error(`[404] Unmatched request: ${req.method} ${req.path} - Query: ${JSON.stringify(req.query)}`);
+    logger.error(`[404] Full URL: ${req.protocol}://${req.get('host')}${req.originalUrl}`);
+  }
+  res.status(404).json({ error: 'Not found' });
+});
+
 // Start our own HTTP server using Express app
 const http = require('http');
 const server = http.createServer((req, res) => {
@@ -585,37 +606,8 @@ try {
   logger.error('Failed to load configure handler:', error);
 }
 
-// Re-register token-based routes AFTER serveHTTP to ensure they take precedence
-app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
-  const { token } = req.params;
-  const config = tokenManager.getConfigForToken(token);
-  if (!config) {
-    return res.status(404).json({ error: 'Invalid token' });
-  }
-  res.json(manifest);
-});
-
-app.get('/stremio/:token/:encrypted/catalog/:type/:id.json', async (req, res) => {
-  const { type, id } = req.params;
-  try {
-    const catalogData = await catalogHandler({ type, id, extra: req.query });
-    res.json(catalogData);
-  } catch (error) {
-    logger.error('[CATALOG] Error getting catalog:', error);
-    res.status(500).json({ error: 'Failed to get catalog' });
-  }
-});
-
-app.get('/stremio/:token/:encrypted/meta/:type/:id.json', async (req, res) => {
-  const { type, id } = req.params;
-  try {
-    const metaData = await metaHandler({ type, id });
-    res.json(metaData);
-  } catch (error) {
-    logger.error('[META] Error getting meta:', error);
-    res.status(500).json({ error: 'Failed to get meta' });
-  }
-});
+// Note: Token-based routes are already registered BEFORE serveHTTP above
+// No need to re-register them here
 
 app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => {
   const { token, type, id } = req.params;
