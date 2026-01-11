@@ -388,12 +388,22 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 // Token-based routes for catalog and meta - directly call handlers
 // IMPORTANT: Register these BEFORE serveHTTP so they take precedence
 // Handle catalog routes with flexible ID matching (to support search in path)
-app.get('/stremio/:token/:encrypted/catalog/:type/:id*.json', async (req, res) => {
-  let { type, id } = req.params;
+// Use wildcard to capture everything after /catalog/:type/
+app.get('/stremio/:token/:encrypted/catalog/:type/*', async (req, res) => {
+  const { type } = req.params;
+  const wildcard = req.params[0] || ''; // Everything after /catalog/:type/
   
-  // Handle case where Stremio includes search in the path like: /catalog/movie/tamil/search=query.json
-  // Extract search parameter from id if present
+  // Parse the wildcard path to extract catalog ID and search parameter
+  // Format: telugu/search=akhandha%202.json or just telugu.json
+  let id = wildcard;
   let extra = { ...req.query };
+  
+  // Remove .json extension if present
+  if (id.endsWith('.json')) {
+    id = id.slice(0, -5);
+  }
+  
+  // Check if search parameter is in the path
   const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
   if (searchMatch) {
     id = searchMatch[1]; // Extract the actual catalog ID
@@ -556,12 +566,22 @@ serveHTTP(addonInterface, {
 // Add explicit standard catalog routes as fallback (serveHTTP should create these, but ensure they work)
 // These routes are needed for Stremio Discover/search functionality
 // Handle catalog routes with flexible ID matching (to support search in path)
-app.get('/catalog/:type/:id*.json', async (req, res) => {
-  let { type, id } = req.params;
+// Use wildcard to capture everything after /catalog/:type/
+app.get('/catalog/:type/*', async (req, res) => {
+  const { type } = req.params;
+  const wildcard = req.params[0] || ''; // Everything after /catalog/:type/
   
-  // Handle case where Stremio includes search in the path like: /catalog/movie/tamil/search=query.json
-  // Extract search parameter from id if present
+  // Parse the wildcard path to extract catalog ID and search parameter
+  // Format: telugu/search=akhandha%202.json or just telugu.json
+  let id = wildcard;
   let extra = { ...req.query };
+  
+  // Remove .json extension if present
+  if (id.endsWith('.json')) {
+    id = id.slice(0, -5);
+  }
+  
+  // Check if search parameter is in the path
   const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
   if (searchMatch) {
     id = searchMatch[1]; // Extract the actual catalog ID
