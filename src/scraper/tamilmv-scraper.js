@@ -3,6 +3,7 @@ const cheerio = require('cheerio');
 const logger = require('../utils/logger');
 const constants = require('../utils/constants');
 const TMDBClient = require('../integrations/tmdb-client');
+const { resolveLatestDomain } = require('../utils/domain-resolver');
 const { 
   parseMovieListings, 
   extractLanguage, 
@@ -57,6 +58,14 @@ class TamilMVScraper {
   }
 
   /**
+   * Resolve and update the latest domain
+   */
+  async resolveDomain() {
+    this.baseUrl = await resolveLatestDomain();
+    logger.info(`TamilMV scraper using domain: ${this.baseUrl}`);
+  }
+
+  /**
    * Make HTTP request with retry logic
    */
   async fetchWithRetry(url, retries = 3) {
@@ -91,6 +100,9 @@ class TamilMVScraper {
    * @param {boolean} skipCacheCheck - If true, skip checking cache before scraping
    */
   async scrapeAll(skipCacheCheck = false) {
+    // Resolve latest domain before scraping
+    await this.resolveDomain();
+    
     logger.info('Starting full scrape from homepage...');
     const result = {
       catalogs: {},
@@ -115,7 +127,7 @@ class TamilMVScraper {
     
     // Step 2: Extract all movie/series links from homepage
     logger.info('Extracting movie/series links from homepage...');
-    const listings = parseMovieListings(homepageHtml);
+    const listings = parseMovieListings(homepageHtml, this.baseUrl);
     logger.info(`Found ${listings.length} content items on homepage`);
     
     if (listings.length === 0) {

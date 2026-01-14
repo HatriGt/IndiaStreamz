@@ -3,8 +3,10 @@ const logger = require('../utils/logger');
 
 /**
  * Parse HTML to extract movie listings from forum
+ * @param {string} html - The HTML content
+ * @param {string} baseUrl - The base URL to use for relative links (default: https://www.1tamilmv.lc)
  */
-function parseMovieListings(html) {
+function parseMovieListings(html, baseUrl = 'https://www.1tamilmv.lc') {
   const $ = cheerio.load(html);
   const movies = [];
 
@@ -77,7 +79,7 @@ function parseMovieListings(html) {
     // Accept titles as short as 10 chars (some quality-only links might be valid)
     if (href && title && title.length >= 10) {
       // Make URL absolute
-      let fullUrl = href.startsWith('http') ? href : `https://www.1tamilmv.lc${href}`;
+      let fullUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
       
       // For this site, the query string IS the path (e.g., /index.php?/forums/topic/195489-...)
       // Extract topic ID for normalization, or use full URL without hash
@@ -152,7 +154,7 @@ function parseMovieListings(html) {
         }
         
         // Make URL absolute
-        const fullUrl = href.startsWith('http') ? href : `https://www.1tamilmv.lc${href}`;
+        const fullUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
         const normalizedUrl = fullUrl.split('?')[0].split('#')[0];
         
         // Check if already exists
@@ -193,7 +195,7 @@ function parseMovieListings(html) {
       return;
     }
     
-    const fullUrl = href.startsWith('http') ? href : `https://www.1tamilmv.lc${href}`;
+    const fullUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
     
     // Check if we already have this URL
     const exists = movies.some(m => {
@@ -231,7 +233,7 @@ function parseMovieListings(html) {
       return;
     }
     
-    const fullUrl = href.startsWith('http') ? href : `https://www.1tamilmv.lc${href}`;
+    const fullUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
     
     // Check if already exists
     const exists = movies.some(m => {
