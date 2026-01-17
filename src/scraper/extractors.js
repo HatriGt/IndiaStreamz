@@ -167,14 +167,18 @@ function extractStreamDetailsFromMagnet(magnetLink) {
       audioBitrate: null,
       size: null,
       source: null,
-      languages: []
+      languages: [],
+      hdr: false,
+      dv: false,
+      atmos: false,
+      provider: null
     };
     
     const upper = displayName.toUpperCase();
     
     // Extract quality (4K, 1080p, 720p, etc.)
     if (upper.includes('4K') || upper.includes('2160P') || upper.includes('UHD')) {
-      details.quality = '4K';
+      details.quality = '2160p';
     } else if (upper.includes('1080P') || upper.includes('FULL HD')) {
       details.quality = '1080p';
     } else if (upper.includes('720P') || upper.includes('HD')) {
@@ -183,6 +187,34 @@ function extractStreamDetailsFromMagnet(magnetLink) {
       details.quality = '480p';
     } else {
       details.quality = '1080p'; // Default
+    }
+    
+    // Extract HDR/DV info
+    if (upper.includes('HDR') || upper.includes('HIGH DYNAMIC RANGE')) {
+      details.hdr = true;
+    }
+    if (upper.includes('DV') || upper.includes('DOLBY VISION')) {
+      details.dv = true;
+    }
+    
+    // Extract Atmos
+    if (upper.includes('ATMOS') || upper.includes('DOLBY ATMOS')) {
+      details.atmos = true;
+    }
+    
+    // Extract source provider (Netflix, Disney+, etc.)
+    if (upper.includes('NETFLIX')) {
+      details.provider = 'Netflix';
+    } else if (upper.includes('DISNEY') || upper.includes('DISNEY+') || upper.includes('DISNEYPLUS')) {
+      details.provider = 'Disney+';
+    } else if (upper.includes('AMAZON') || upper.includes('PRIME') || upper.includes('AMAZON PRIME')) {
+      details.provider = 'Amazon Prime';
+    } else if (upper.includes('HBO') || upper.includes('MAX') || upper.includes('HBOMAX')) {
+      details.provider = 'HBO Max';
+    } else if (upper.includes('APPLE') || upper.includes('APPLE TV') || upper.includes('APPLETV')) {
+      details.provider = 'Apple TV+';
+    } else if (upper.includes('HULU')) {
+      details.provider = 'Hulu';
     }
     
     // Extract codec (HEVC, AVC, x264, x265, H.264, H.265)
@@ -251,7 +283,69 @@ function extractStreamDetailsFromMagnet(magnetLink) {
 }
 
 /**
- * Format stream name in aiostream style
+ * Format stream description with all details (for description field)
+ * Format: 📦 Size | 🎥 Source 💾 Codec | 💎 HDR/DV | 🎧 Audio | 🌐 Debrid | 🔻 Provider
+ */
+function formatStreamDescription(details) {
+  if (!details) return null;
+  
+  const parts = [];
+  
+  // File size
+  if (details.size) {
+    parts.push(`📦 ${details.size}`);
+  }
+  
+  // Source and codec
+  const sourceCodec = [];
+  if (details.source) {
+    sourceCodec.push(`🎥 ${details.source}`);
+  }
+  if (details.codec) {
+    sourceCodec.push(`💾 ${details.codec}`);
+  }
+  if (sourceCodec.length > 0) {
+    parts.push(sourceCodec.join(' '));
+  }
+  
+  // HDR/DV
+  const hdrParts = [];
+  if (details.hdr) {
+    hdrParts.push('HDR');
+  }
+  if (details.dv) {
+    hdrParts.push('DV');
+  }
+  if (hdrParts.length > 0) {
+    parts.push(`💎 ${hdrParts.join(' | ')}`);
+  }
+  
+  // Audio
+  const audioParts = [];
+  if (details.atmos) {
+    audioParts.push('Atmos');
+  }
+  if (details.audio) {
+    audioParts.push(details.audio);
+  }
+  if (audioParts.length > 0) {
+    const audioStr = audioParts.join(' | ');
+    parts.push(`🎧 ${audioStr}${details.audioBitrate ? ` 🎧 ${details.audioBitrate}` : ''}`);
+  }
+  
+  // Debrid indicator (always show if available)
+  parts.push('🌐 Debrid');
+  
+  // Provider
+  if (details.provider) {
+    parts.push(`🔻 ${details.provider}`);
+  }
+  
+  return parts.length > 0 ? parts.join(' | ') : null;
+}
+
+/**
+ * Format stream name in aiostream style (legacy - kept for backward compatibility)
  * Format: Quality - Codec - Audio - Size
  * Example: "4K - HEVC - DD+5.1 640Kbps - 17.8GB"
  */
@@ -295,6 +389,7 @@ function formatStreamName(details) {
 /**
  * Structure streams for Stremio stream format
  * Improved to extract detailed quality info from magnet links (aiostream style)
+ * Header shows only quality, description shows all details
  */
 function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualities = []) {
   const streams = [];
@@ -307,33 +402,42 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     if (!infoHash) continue;
     
     // Extract detailed info from magnet link
-    let streamName = '1080p'; // Default
     const details = extractStreamDetailsFromMagnet(magnet);
+    let quality = '1080p'; // Default
     
-    if (details) {
-      // Use detailed formatting (aiostream style)
-      streamName = formatStreamName(details);
+    if (details && details.quality) {
+      quality = details.quality;
     } else {
       // Fallback: try to extract quality from magnet description
       if (magnetDescriptions && magnetDescriptions[i]) {
-        streamName = extractQualityFromMagnetText(magnetDescriptions[i]);
+        quality = extractQualityFromMagnetText(magnetDescriptions[i]);
       } else if (qualities && qualities.length > 0) {
         const qualityIndex = i % qualities.length;
-        streamName = qualities[qualityIndex];
+        quality = qualities[qualityIndex];
       }
     }
+    
+    // Format description with all details
+    const description = formatStreamDescription(details);
     
     // For torrents, Stremio requires infoHash (works in desktop app)
     // Note: Web player doesn't support torrents - users need desktop app
     // We include externalUrl as fallback for web users to download manually
-    streams.push({
-      name: streamName, // Detailed formatted name (aiostream style)
+    const streamObj = {
+      name: quality, // Just quality - cache tick will be added in stream-handler
       infoHash: infoHash, // Stremio desktop will handle the torrent using this
       externalUrl: magnet, // Fallback: magnet link for manual download (web users)
       behaviorHints: {
         bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
       }
-    });
+    };
+    
+    // Add description if available
+    if (description) {
+      streamObj.description = description;
+    }
+    
+    streams.push(streamObj);
   }
   
   // If no magnets, return empty

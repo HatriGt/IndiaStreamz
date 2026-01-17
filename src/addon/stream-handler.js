@@ -133,26 +133,13 @@ function generateProxyUrl(magnetLink, token, encrypted, baseUrl) {
 }
 
 /**
- * Format stream name with emojis and green checkmark for cached streams
+ * Format stream name (header) - only quality and cache tick
+ * streamName is now just the quality (e.g., "2160p", "1080p")
  */
 function formatStreamNameWithEmoji(streamName, isCached) {
-  // Add quality emojis based on stream name
-  let emoji = '🎬'; // Default movie emoji
-  
-  if (streamName.includes('4K') || streamName.includes('2160p')) {
-    emoji = '🎥'; // 4K quality
-  } else if (streamName.includes('1080p')) {
-    emoji = '📹'; // 1080p quality
-  } else if (streamName.includes('720p')) {
-    emoji = '📺'; // 720p quality
-  } else if (streamName.includes('480p') || streamName.includes('360p')) {
-    emoji = '📱'; // Lower quality
-  }
-  
-  // Add green checkmark if cached
+  // streamName is now just the quality (e.g., "2160p", "1080p")
   const cachedIndicator = isCached ? '✅ ' : '';
-  
-  return `${cachedIndicator}${emoji} ${streamName}`;
+  return `${cachedIndicator}${streamName}`;
 }
 
 async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) {
@@ -225,6 +212,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to streaming URL with auth headers: ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
+            description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
             behaviorHints: {
@@ -242,6 +230,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to direct video URL: ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
+            description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
             behaviorHints: {
@@ -254,6 +243,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to streaming URL (unknown format): ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
+            description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
             behaviorHints: {
@@ -269,6 +259,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
         
         return {
           name: streamName,
+          description: stream.description, // Preserve description
           url: proxyUrl || undefined, // Use proxy URL if available
           infoHash: stream.infoHash, // Keep infoHash as fallback for desktop Stremio
           externalUrl: magnetLink,
@@ -281,6 +272,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
       logger.error(`Error checking cache for stream:`, error.message);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
+        description: stream.description, // Preserve description
         infoHash: stream.infoHash,
         externalUrl: stream.externalUrl,
         isCached: false,
@@ -300,6 +292,7 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
       logger.error(`Stream conversion failed:`, result.reason);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
+        description: stream.description, // Preserve description
         infoHash: stream.infoHash,
         externalUrl: stream.externalUrl,
         isCached: false,
