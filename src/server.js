@@ -338,7 +338,9 @@ const proxyRateLimiter = rateLimit({
 
 // Register proxy route BEFORE serveHTTP to ensure it takes precedence
 // Route: /stremio/:token/:encrypted/proxy/:magnetHash
+// Handle both GET and HEAD requests (HEAD is used by players for checking availability)
 app.get('/stremio/:token/:encrypted/proxy/:magnetHash', proxyRateLimiter, proxyStreamHandler);
+app.head('/stremio/:token/:encrypted/proxy/:magnetHash', proxyRateLimiter, proxyStreamHandler);
 logger.info('Proxy route registered: /stremio/:token/:encrypted/proxy/:magnetHash');
 
 // API key is extracted by middleware and set in query params
