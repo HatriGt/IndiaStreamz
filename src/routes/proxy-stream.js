@@ -4,6 +4,46 @@ const TorboxClient = require('../integrations/torbox-client');
 const tokenManager = require('../utils/token-manager');
 const { decodeMagnet } = require('../utils/magnet-encoder');
 
+// Cache streaming URLs by torrent_id to avoid regenerating them
+// This prevents position loss when seeking
+const streamingUrlCache = new Map(); // Map<torrentId, { url: string, timestamp: number, source: 'mylist' | 'createstream' }>
+
+// Different TTLs based on URL source:
+// - mylist URLs are more stable (from user's account) - 3 days
+// - createstream URLs have tokens that may expire - 24 hours
+const CACHE_TTL_MYLIST = 259200000; // 3 days (3 * 24 * 60 * 60 * 1000 ms)
+const CACHE_TTL_CREATESTREAM = 86400000; // 24 hours (24 * 60 * 60 * 1000 ms)
+
+/**
+ * Get cached streaming URL or null if not cached/expired
+ */
+function getCachedStreamingUrl(torrentId) {
+  const cached = streamingUrlCache.get(torrentId);
+  if (cached) {
+    const ttl = cached.source === 'mylist' ? CACHE_TTL_MYLIST : CACHE_TTL_CREATESTREAM;
+    if ((Date.now() - cached.timestamp) < ttl) {
+      logger.debug(`[PROXY] Using cached streaming URL for torrent_id: ${torrentId} (source: ${cached.source})`);
+      return cached.url;
+    } else {
+      streamingUrlCache.delete(torrentId); // Remove expired entry
+      logger.debug(`[PROXY] Cached streaming URL expired for torrent_id: ${torrentId}`);
+    }
+  }
+  return null;
+}
+
+/**
+ * Cache a streaming URL for a torrent_id
+ */
+function cacheStreamingUrl(torrentId, url, source = 'createstream') {
+  streamingUrlCache.set(torrentId, {
+    url: url,
+    timestamp: Date.now(),
+    source: source // 'mylist' or 'createstream'
+  });
+  logger.debug(`[PROXY] Cached streaming URL for torrent_id: ${torrentId} (source: ${source})`);
+}
+
 /**
  * Proxy stream route handler
  * Handles requests to add non-cached torrents to Torbox and redirect to streaming URL
@@ -55,21 +95,41 @@ async function proxyStreamHandler(req, res) {
         if (existingTorrent) {
           logger.debug(`[PROXY] Torrent already in mylist (hash: ${infoHash.substring(0, 8)}...)`);
           
-          // Check if it has streaming URL directly in mylist response
+          // Check if it has streaming URL directly in mylist response (most stable - prefer this!)
           if (existingTorrent.hls_url || existingTorrent.stream_url) {
             const streamingUrl = existingTorrent.hls_url || existingTorrent.stream_url;
             logger.info(`[PROXY] Found existing torrent with streaming URL, redirecting: ${streamingUrl.substring(0, 50)}...`);
             const duration = Date.now() - startTime;
             logger.info(`[PROXY] Request completed in ${duration}ms (cached, from mylist)`);
+            
+            // Cache the URL for future requests (mylist URLs are more stable)
+            const torrentId = existingTorrent.torrent_id || existingTorrent.id;
+            if (torrentId) {
+              cacheStreamingUrl(torrentId, streamingUrl, 'mylist');
+            }
+            
             return res.redirect(302, streamingUrl);
           }
           
-          // Get streaming URL using torrent_id (for cached torrents, this should work immediately)
+          // Get streaming URL using torrent_id
           const torrentId = existingTorrent.torrent_id || existingTorrent.id;
           if (torrentId) {
+            // Check cache first to avoid regenerating stream session
+            const cachedUrl = getCachedStreamingUrl(torrentId);
+            if (cachedUrl) {
+              logger.info(`[PROXY] Using cached streaming URL for existing torrent, redirecting: ${cachedUrl.substring(0, 50)}...`);
+              const duration = Date.now() - startTime;
+              logger.info(`[PROXY] Request completed in ${duration}ms (cached, from cache)`);
+              return res.redirect(302, cachedUrl);
+            }
+            
             logger.debug(`[PROXY] Getting streaming URL for existing torrent_id: ${torrentId}`);
             const streamingUrl = await torbox.getStreamingUrl(torrentId);
             if (streamingUrl) {
+              // Cache the URL to prevent regenerating it on subsequent requests
+              // Note: This is from createstream, so shorter TTL
+              cacheStreamingUrl(torrentId, streamingUrl, 'createstream');
+              
               logger.info(`[PROXY] Got streaming URL for existing torrent, redirecting: ${streamingUrl.substring(0, 50)}...`);
               const duration = Date.now() - startTime;
               logger.info(`[PROXY] Request completed in ${duration}ms (cached, from getStreamingUrl)`);
@@ -105,6 +165,15 @@ async function proxyStreamHandler(req, res) {
     
     logger.debug(`[PROXY] Extracted torrent_id: ${torrentId}`);
     
+    // Check cache first to avoid regenerating stream session
+    const cachedUrl = getCachedStreamingUrl(torrentId);
+    if (cachedUrl) {
+      logger.info(`[PROXY] Using cached streaming URL for torrent ${torrentId}, redirecting: ${cachedUrl.substring(0, 50)}...`);
+      const duration = Date.now() - startTime;
+      logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
+      return res.redirect(302, cachedUrl);
+    }
+    
     // Check if it's already cached (from addMagnet response detail)
     const isCached = addResult.detail && (
       addResult.detail.includes('Found Cached Torrent') || 
@@ -124,6 +193,10 @@ async function proxyStreamHandler(req, res) {
         logger.info(`[PROXY] Got streaming URL from addMagnet response, redirecting: ${url.substring(0, 50)}...`);
         const duration = Date.now() - startTime;
         logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
+        
+        // Cache the URL (from addResult, likely from mylist)
+        cacheStreamingUrl(torrentId, url, 'mylist');
+        
         return res.redirect(302, url);
       }
       
@@ -131,6 +204,9 @@ async function proxyStreamHandler(req, res) {
       // Cached torrents should be ready immediately, so no need to wait
       const streamingUrl = await torbox.getStreamingUrl(torrentId);
       if (streamingUrl) {
+        // Cache the URL to prevent regenerating it (from createstream, shorter TTL)
+        cacheStreamingUrl(torrentId, streamingUrl, 'createstream');
+        
         logger.info(`[PROXY] Got streaming URL for cached torrent, redirecting: ${streamingUrl.substring(0, 50)}...`);
         const duration = Date.now() - startTime;
         logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
@@ -152,6 +228,10 @@ async function proxyStreamHandler(req, res) {
             logger.info(`[PROXY] Found streaming URL in mylist for cached torrent, redirecting: ${url.substring(0, 50)}...`);
             const duration = Date.now() - startTime;
             logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
+            
+            // Cache the URL (from mylist, longer TTL)
+            cacheStreamingUrl(torrentId, url, 'mylist');
+            
             return res.redirect(302, url);
           }
         }
@@ -175,6 +255,10 @@ async function proxyStreamHandler(req, res) {
           logger.info(`[PROXY] Got streaming URL via direct createstream, redirecting: ${url.substring(0, 50)}...`);
           const duration = Date.now() - startTime;
           logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
+          
+          // Cache the URL (from createstream, shorter TTL)
+          cacheStreamingUrl(torrentId, url, 'createstream');
+          
           return res.redirect(302, url);
         }
       } catch (error) {
@@ -190,6 +274,9 @@ async function proxyStreamHandler(req, res) {
     const streamingUrl = await torbox.waitForReady(torrentId, constants.TORBOX_PROXY_TIMEOUT);
     
     if (streamingUrl) {
+      // Cache the URL (from createstream, shorter TTL)
+      cacheStreamingUrl(torrentId, streamingUrl, 'createstream');
+      
       logger.info(`[PROXY] Torrent ${torrentId} is ready, redirecting: ${streamingUrl.substring(0, 50)}...`);
       const duration = Date.now() - startTime;
       logger.info(`[PROXY] Request completed in ${duration}ms (non-cached)`);
@@ -201,6 +288,9 @@ async function proxyStreamHandler(req, res) {
       // Try to get streaming URL one more time (might be ready now)
       const finalUrl = await torbox.getStreamingUrl(torrentId);
       if (finalUrl) {
+        // Cache the URL (from createstream, shorter TTL)
+        cacheStreamingUrl(torrentId, finalUrl, 'createstream');
+        
         logger.info(`[PROXY] Torrent ${torrentId} became ready after timeout check, redirecting: ${finalUrl.substring(0, 50)}...`);
         const duration = Date.now() - startTime;
         logger.info(`[PROXY] Request completed in ${duration}ms (non-cached, retry)`);
