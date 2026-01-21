@@ -283,71 +283,11 @@ class TorboxClient {
       const numericTorrentId = typeof torrentId === 'string' ? parseInt(torrentId, 10) : torrentId;
       const numericFileIndex = typeof fileIndex === 'string' ? parseInt(fileIndex, 10) : fileIndex;
       
-      // Try method 1: requestdl endpoint with POST and form data (as number)
+      // PRIMARY METHOD: Use createstream endpoint (this is what works for cached torrents)
+      // According to Torbox API docs: /v1/api/stream/createstream
+      // Method: GET with query parameters
       try {
-        const formData = new FormData();
-        formData.append('torrent_id', numericTorrentId);
-        if (numericFileIndex !== undefined && numericFileIndex !== null) {
-          formData.append('file_index', numericFileIndex);
-        }
-        
         logger.debug(`Torbox: Requesting streaming URL for torrent_id: ${numericTorrentId}, file_index: ${numericFileIndex}`);
-        const response = await this.client.post('/api/torrents/requestdl', formData, {
-          headers: formData.getHeaders()
-        });
-        
-        logger.debug(`Torbox: requestdl response:`, JSON.stringify(response.data, null, 2));
-        
-        if (response.data && response.data.url) {
-          logger.debug(`Torbox: Got streaming URL from requestdl:`, response.data.url);
-          return response.data.url;
-        }
-        
-        // Also try with data.url nested
-        if (response.data && response.data.data && response.data.data.url) {
-          logger.debug(`Torbox: Got streaming URL from requestdl (nested):`, response.data.data.url);
-          return response.data.data.url;
-        }
-        
-        // Try data.stream_url
-        if (response.data && response.data.stream_url) {
-          logger.debug(`Torbox: Got streaming URL from requestdl (stream_url):`, response.data.stream_url);
-          return response.data.stream_url;
-        }
-      } catch (error) {
-        logger.debug(`Torbox: requestdl POST failed:`, error.response?.data || error.message);
-      }
-      
-      // Try method 1b: requestdl with string values
-      try {
-        const formData = new FormData();
-        formData.append('torrent_id', String(torrentId));
-        if (fileIndex !== undefined && fileIndex !== null) {
-          formData.append('file_index', String(fileIndex));
-        }
-        
-        const response = await this.client.post('/api/torrents/requestdl', formData, {
-          headers: formData.getHeaders()
-        });
-        
-        if (response.data && response.data.url) {
-          logger.debug(`Torbox: Got streaming URL from requestdl (string):`, response.data.url);
-          return response.data.url;
-        }
-      } catch (error) {
-        logger.debug(`Torbox: requestdl POST (string) failed:`, error.response?.data || error.message);
-      }
-
-      // Method 2: stream endpoints - CORRECTED based on Torbox API docs
-      // According to docs: /v1/api/stream/createstream
-      // Method: GET (not POST!)
-      // Parameters: Query parameters (not form data!)
-      // - id (required, integer) - this is the torrent_id
-      // - file_id (integer, default: 0)
-      // - type (string, default: "torrent")
-      // Response: JSON object with data.hls_url containing the streaming URL
-      try {
-        logger.debug(`Torbox: Creating stream for id: ${numericTorrentId}, file_id: ${numericFileIndex}`);
         const streamResponse = await this.client.get('/api/stream/createstream', {
           params: {
             id: numericTorrentId,  // Required parameter (not torrent_id!)
@@ -363,7 +303,7 @@ class TorboxClient {
         if (streamResponse.data && streamResponse.data.data) {
           const hlsUrl = streamResponse.data.data.hls_url;
           if (hlsUrl && typeof hlsUrl === 'string') {
-            logger.debug(`Torbox: Got HLS URL from createstream:`, hlsUrl);
+            logger.debug(`Torbox: Got HLS URL from createstream: ${hlsUrl}`);
             return hlsUrl;
           }
           
@@ -372,21 +312,57 @@ class TorboxClient {
                           streamResponse.data.data.stream_url ||
                           streamResponse.data.data.streaming_url;
           if (streamUrl && typeof streamUrl === 'string') {
-            logger.debug(`Torbox: Got streaming URL from createstream (alternative field):`, streamUrl);
+            logger.debug(`Torbox: Got streaming URL from createstream (alternative field): ${streamUrl}`);
             return streamUrl;
           }
         }
         
         // Fallback: if response is a string (direct URL)
         if (streamResponse.data && typeof streamResponse.data === 'string') {
-          logger.debug(`Torbox: Got streaming URL from createstream (direct string):`, streamResponse.data);
+          logger.debug(`Torbox: Got streaming URL from createstream (direct string): ${streamResponse.data}`);
           return streamResponse.data;
         }
       } catch (error) {
-        logger.error(`Torbox: Stream endpoint failed:`, error.response?.data || error.message);
+        logger.debug(`Torbox: createstream failed:`, error.response?.data || error.message);
       }
 
-      // Try method 3: GET with query params (fallback)
+      // FALLBACK: Try requestdl endpoint (only if createstream fails)
+      // Note: requestdl POST may not be supported, but we try as fallback
+      try {
+        const formData = new FormData();
+        formData.append('torrent_id', numericTorrentId);
+        if (numericFileIndex !== undefined && numericFileIndex !== null) {
+          formData.append('file_index', numericFileIndex);
+        }
+        
+        logger.debug(`Torbox: Trying requestdl for torrent_id: ${numericTorrentId}, file_index: ${numericFileIndex}`);
+        const response = await this.client.post('/api/torrents/requestdl', formData, {
+          headers: formData.getHeaders()
+        });
+        
+        logger.debug(`Torbox: requestdl response:`, JSON.stringify(response.data, null, 2));
+        
+        if (response.data && response.data.url) {
+          logger.debug(`Torbox: Got streaming URL from requestdl: ${response.data.url}`);
+          return response.data.url;
+        }
+        
+        // Also try with data.url nested
+        if (response.data && response.data.data && response.data.data.url) {
+          logger.debug(`Torbox: Got streaming URL from requestdl (nested): ${response.data.data.url}`);
+          return response.data.data.url;
+        }
+        
+        // Try data.stream_url
+        if (response.data && response.data.stream_url) {
+          logger.debug(`Torbox: Got streaming URL from requestdl (stream_url): ${response.data.stream_url}`);
+          return response.data.stream_url;
+        }
+      } catch (error) {
+        logger.debug(`Torbox: requestdl POST failed (expected for some endpoints):`, error.response?.data || error.message);
+      }
+
+      // FALLBACK 2: Try GET with query params
       try {
         const response = await this.client.get('/api/torrents/requestdl', {
           params: {
@@ -396,7 +372,7 @@ class TorboxClient {
         });
         
         if (response.data && response.data.url) {
-          logger.debug(`Torbox: Got streaming URL from requestdl (GET):`, response.data.url);
+          logger.debug(`Torbox: Got streaming URL from requestdl (GET): ${response.data.url}`);
           return response.data.url;
         }
       } catch (error) {
