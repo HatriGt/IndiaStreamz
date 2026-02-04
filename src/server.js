@@ -97,6 +97,10 @@ app.get('/', (req, res) => {
   res.redirect('/configure');
 });
 
+// Configuration page (must be registered early, before 404 handler)
+const configureHandler = require('./routes/configure');
+app.get('/configure', configureHandler);
+
 // API endpoint to create token and generate addon URL
 app.post('/api/create-token', async (req, res) => {
   try {
@@ -564,15 +568,7 @@ server.listen(constants.PORT, '0.0.0.0', () => {
   logger.info(`Custom routes should now work: http://localhost:${constants.PORT}/configure`);
 });
 
-// Re-register /configure route AFTER serveHTTP to ensure it takes precedence
-try {
-  const configureHandler = require('./routes/configure');
-  app.get('/configure', configureHandler);
-} catch (error) {
-  logger.error('Failed to load configure handler:', error);
-}
-
-// Note: Token-based routes are already registered BEFORE serveHTTP above
+// Note: /configure is registered early (before 404 handler) to ensure it's reachable
 // No need to re-register them here
 
 app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => {
