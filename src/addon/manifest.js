@@ -130,5 +130,23 @@ const manifest = {
   idPrefixes: ['tt', 'tmdb', 'tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
 };
 
+/**
+ * Get manifest filtered by visible catalogs
+ * @param {string[]} [visibleCatalogs] - Array of catalog IDs to show. Empty/undefined = show all
+ * @returns {object} Manifest with filtered catalogs
+ */
+function getManifestForCatalogs(visibleCatalogs) {
+  if (!Array.isArray(visibleCatalogs) || visibleCatalogs.length === 0) {
+    return manifest;
+  }
+  const visibleSet = new Set(visibleCatalogs);
+  const filteredCatalogs = manifest.catalogs.filter(cat => visibleSet.has(cat.id));
+  return {
+    ...manifest,
+    catalogs: filteredCatalogs
+  };
+}
+
 module.exports = manifest;
+module.exports.getManifestForCatalogs = getManifestForCatalogs;
 

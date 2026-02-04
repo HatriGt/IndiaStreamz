@@ -60,8 +60,11 @@ function generateToken() {
 
 /**
  * Create a token and store the encrypted API key
+ * @param {string} torboxApiKey - Torbox API key
+ * @param {string} torboxApiUrl - Torbox API URL
+ * @param {string[]} [visibleCatalogs] - Array of catalog IDs to show (e.g. ['tamil','telugu']). Empty/undefined = show all
  */
-async function createToken(torboxApiKey, torboxApiUrl) {
+async function createToken(torboxApiKey, torboxApiUrl, visibleCatalogs) {
   const token = generateToken();
   const encrypted = encrypt(torboxApiKey);
   
@@ -69,6 +72,7 @@ async function createToken(torboxApiKey, torboxApiUrl) {
   tokensCache[token] = {
     torboxApiKey: torboxApiKey, // Store plaintext in memory for quick access
     torboxApiUrl: torboxApiUrl,
+    visibleCatalogs: Array.isArray(visibleCatalogs) ? visibleCatalogs : undefined,
     encrypted: encrypted, // Store encrypted for persistence
     createdAt: new Date().toISOString()
   };
@@ -81,13 +85,27 @@ async function createToken(torboxApiKey, torboxApiUrl) {
 }
 
 /**
+ * Update catalog visibility for an existing token
+ */
+async function updateTokenCatalogs(token, visibleCatalogs) {
+  if (!tokensCache[token]) {
+    return false;
+  }
+  tokensCache[token].visibleCatalogs = Array.isArray(visibleCatalogs) ? visibleCatalogs : undefined;
+  await saveTokens();
+  logger.info(`[TOKEN] Updated catalogs for token: ${token.substring(0, 8)}...`);
+  return true;
+}
+
+/**
  * Get config for a token
  */
 function getConfigForToken(token) {
   if (tokensCache[token]) {
     return {
       torboxApiKey: tokensCache[token].torboxApiKey,
-      torboxApiUrl: tokensCache[token].torboxApiUrl
+      torboxApiUrl: tokensCache[token].torboxApiUrl,
+      visibleCatalogs: tokensCache[token].visibleCatalogs
     };
   }
   return null;
@@ -105,6 +123,7 @@ async function saveTokens() {
       fileData[token] = {
         encrypted: config.encrypted,
         torboxApiUrl: config.torboxApiUrl,
+        visibleCatalogs: config.visibleCatalogs,
         createdAt: config.createdAt
       };
     }
@@ -132,6 +151,7 @@ async function loadTokens() {
         tokensCache[token] = {
           torboxApiKey: decryptedKey,
           torboxApiUrl: config.torboxApiUrl,
+          visibleCatalogs: config.visibleCatalogs,
           encrypted: config.encrypted,
           createdAt: config.createdAt
         };
@@ -173,6 +193,7 @@ loadTokens().catch(err => {
 module.exports = {
   createToken,
   getConfigForToken,
+  updateTokenCatalogs,
   extractTokenFromPath,
   loadTokens
 };
