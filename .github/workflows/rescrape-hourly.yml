@@ -1,0 +1,22 @@
+name: Hourly Rescrape Trigger
+
+on:
+  schedule:
+    # Run every hour at minute 0
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allow manual trigger from Actions tab
+
+jobs:
+  rescrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger rescrape
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "https://indiastreamz.ajeethkumar.dev/api/rescrape?secret=11@Toppy")
+          if [ "$response" -ge 200 ] && [ "$response" -lt 300 ]; then
+            echo "Rescrape triggered successfully (HTTP $response)"
+          else
+            echo "Rescrape request returned HTTP $response"
+            exit 1
+          fi
