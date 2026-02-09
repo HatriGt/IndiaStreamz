@@ -127,7 +127,8 @@ const manifest = {
       ]
     }
   ],
-  idPrefixes: ['tt', 'tmdb', 'tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
+  // Only our catalog IDs - don't include tt/tmdb so we're not asked for content from other addons
+  idPrefixes: ['tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
 };
 
 /**
