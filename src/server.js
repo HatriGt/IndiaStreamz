@@ -308,6 +308,11 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   
   // Filter catalogs based on user preference
   const manifestToServe = getManifestForCatalogs(config.visibleCatalogs);
+  const catalogCount = manifestToServe.catalogs.length;
+  logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')})`);
+  
+  // Prevent Stremio from caching manifest so catalog preference changes take effect
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.json(manifestToServe);
 });
 
