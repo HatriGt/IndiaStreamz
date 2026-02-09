@@ -90,7 +90,7 @@ function structureMovieForCatalog(movieData) {
 function structureMovieForMeta(movieData) {
   // Prioritize TMDB title if available, else use scraped title
   // Priority: tmdbTitle > title (scraped) > name (from meta)
-  const title = movieData.tmdbTitle || movieData.title || movieData.name || '';
+  const title = stripInvisibleChars(movieData.tmdbTitle || movieData.title || movieData.name || '');
   const displayName = title ? (movieData.tmdbTitle ? title : cleanTitleForDisplay(title)) : '';
   
   // Ensure arrays are always arrays, never null
@@ -101,8 +101,8 @@ function structureMovieForMeta(movieData) {
   const productionCompanies = Array.isArray(movieData.productionCompanies) ? movieData.productionCompanies : null;
   const spokenLanguages = Array.isArray(movieData.spokenLanguages) ? movieData.spokenLanguages : null;
   
-  // Ensure description is meaningful
-  let description = movieData.description;
+  // Ensure description is meaningful (sanitize invisible chars)
+  let description = stripInvisibleChars(movieData.description || '');
   if (!description && displayName) {
     const langStr = movieData.languages && Array.isArray(movieData.languages) && movieData.languages.length > 0
       ? movieData.languages.join(', ')
@@ -113,12 +113,12 @@ function structureMovieForMeta(movieData) {
   return {
     id: movieData.id || '',
     type: 'movie',
-    name: displayName || movieData.id || '',
+    name: stripInvisibleChars(displayName || movieData.id || ''),
     poster: movieData.poster || null,
     posterShape: 'regular',
     background: movieData.background || null,
     logo: movieData.logo || null,
-    description: description || null,
+    description: (description && stripInvisibleChars(description)) || null,
     releaseInfo: movieData.releaseInfo || null,
     released: movieData.released || null, // ISO 8601 date
     imdbRating: movieData.imdbRating || null,
@@ -128,9 +128,9 @@ function structureMovieForMeta(movieData) {
     cast: cast,
     runtime: movieData.runtime || null,
     language: movieData.languages && Array.isArray(movieData.languages) && movieData.languages.length > 0
-      ? movieData.languages.join(', ')
+      ? stripInvisibleChars(movieData.languages.join(', '))
       : null,
-    originalLanguage: movieData.originalLanguage || null,
+    originalLanguage: stripInvisibleChars(movieData.originalLanguage || '') || null,
     country: movieData.country || null,
     tagline: movieData.tagline || null,
     trailers: movieData.trailers || null,
@@ -599,8 +599,15 @@ function structureEpisodeStreamsForStremio(magnetLinks, magnetDescriptions = [],
 /**
  * Clean title for display - extracts just the movie/series name (no year, no language)
  */
+// Strip zero-width and invisible chars that break Stremio
+function stripInvisibleChars(str) {
+  if (!str || typeof str !== 'string') return str;
+  return str.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
+}
+
 function cleanTitleForDisplay(title) {
   if (!title) return '';
+  title = stripInvisibleChars(title);
   
   // Remove common technical suffixes and patterns
   let cleaned = title
@@ -786,6 +793,7 @@ module.exports = {
   extractYear,
   parseQuality,
   extractStreamDetailsFromMagnet,
-  formatStreamName
+  formatStreamName,
+  stripInvisibleChars
 };
 
