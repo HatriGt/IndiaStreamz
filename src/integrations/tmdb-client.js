@@ -623,9 +623,8 @@ class TMDBClient {
         video.key
       )
       .map(video => ({
-        youtube: video.key, // Stremio expects 'youtube' field with video ID
-        thumbnail: `https://img.youtube.com/vi/${video.key}/maxresdefault.jpg`,
-        title: video.name || 'Trailer'
+        source: video.key, // Stremio meta spec: trailer is { source: <YouTube ID>, type }
+        type: 'Trailer'
       }))
       .slice(0, 3); // Limit to 3 trailers
 
@@ -815,9 +814,8 @@ class TMDBClient {
         video.key
       )
       .map(video => ({
-        youtube: video.key,
-        thumbnail: `https://img.youtube.com/vi/${video.key}/maxresdefault.jpg`,
-        title: video.name || 'Trailer'
+        source: video.key, // Stremio meta spec: trailer is { source: <YouTube ID>, type }
+        type: 'Trailer'
       }))
       .slice(0, 3); // Limit to 3 trailers
 
