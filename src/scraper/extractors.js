@@ -283,6 +283,42 @@ function extractStreamDetailsFromMagnet(magnetLink) {
 }
 
 /**
+ * Convert a human size string (e.g. "17.8GB", "700MB") to bytes.
+ * @param {string|null} sizeStr
+ * @returns {number|null}
+ */
+function sizeStringToBytes(sizeStr) {
+  if (!sizeStr || typeof sizeStr !== 'string') return null;
+  const match = sizeStr.match(/(\d+\.?\d*)\s*(TB|GB|MB|KB)/i);
+  if (!match) return null;
+  const value = parseFloat(match[1]);
+  const unit = match[2].toUpperCase();
+  const multipliers = { KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
+  const mult = multipliers[unit];
+  if (!mult || !Number.isFinite(value)) return null;
+  return Math.round(value * mult);
+}
+
+/**
+ * Extract a filename from a magnet link's display name (dn=).
+ * @param {string} magnetLink
+ * @returns {string|null}
+ */
+function extractFilenameFromMagnet(magnetLink) {
+  if (!magnetLink || typeof magnetLink !== 'string' || !magnetLink.includes('dn=')) {
+    return null;
+  }
+  const dnMatch = magnetLink.match(/dn=([^&]+)/);
+  if (!dnMatch) return null;
+  try {
+    const name = decodeURIComponent(dnMatch[1]).trim();
+    return name || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
  * Format stream description with all details (for description field)
  * Format: 📦 Size | 🎥 Source 💾 Codec | 💎 HDR/DV | 🎧 Audio | 🌐 Debrid | 🔻 Provider
  */
@@ -419,7 +455,13 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     
     // Format description with all details
     const description = formatStreamDescription(details);
-    
+
+    // BISECT: keep stream object shape identical to last-known-good (054a065).
+    // Only bingeGroup in behaviorHints; no title/videoSize/filename yet.
+    const behaviorHints = {
+      bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
+    };
+
     // For torrents, Stremio requires infoHash (works in desktop app)
     // Note: Web player doesn't support torrents - users need desktop app
     // We include externalUrl as fallback for web users to download manually
@@ -427,16 +469,14 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
       name: quality, // Just quality - cache tick will be added in stream-handler
       infoHash: infoHash, // Stremio desktop will handle the torrent using this
       externalUrl: magnet, // Fallback: magnet link for manual download (web users)
-      behaviorHints: {
-        bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
-      }
+      behaviorHints
     };
-    
+
     // Add description if available
     if (description) {
       streamObj.description = description;
     }
-    
+
     streams.push(streamObj);
   }
   
@@ -794,6 +834,9 @@ module.exports = {
   parseQuality,
   extractStreamDetailsFromMagnet,
   formatStreamName,
+  formatStreamDescription,
+  sizeStringToBytes,
+  extractFilenameFromMagnet,
   stripInvisibleChars
 };
 

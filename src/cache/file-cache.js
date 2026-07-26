@@ -16,7 +16,25 @@ class FileCache {
     this.movieCache = new Map(); // movieId -> { data, mtime }
     this.streamCache = new Map(); // contentId -> { data, mtime }
     
+    this.maxEntries = constants.MEMORY_CACHE_MAX_ENTRIES || 500;
+
     this.ensureDirectories();
+  }
+
+  /**
+   * Insert into an in-memory cache Map with simple LRU eviction.
+   * Maps preserve insertion order, so the first key is the oldest.
+   */
+  _setLru(map, key, value) {
+    // Refresh recency: delete then re-insert so key moves to the end
+    if (map.has(key)) {
+      map.delete(key);
+    }
+    map.set(key, value);
+    while (map.size > this.maxEntries) {
+      const oldestKey = map.keys().next().value;
+      map.delete(oldestKey);
+    }
   }
 
   async ensureDirectories() {
@@ -63,7 +81,7 @@ class FileCache {
       const stats = await fs.stat(filePath);
       
       // Update cache
-      this.catalogCache.set(language, {
+      this._setLru(this.catalogCache, language, {
         data: parsed,
         mtime: stats.mtimeMs
       });
@@ -105,7 +123,7 @@ class FileCache {
       const parsed = JSON.parse(data);
       
       const stats = await fs.stat(filePath);
-      this.movieCache.set(movieId, {
+      this._setLru(this.movieCache, movieId, {
         data: parsed,
         mtime: stats.mtimeMs
       });
@@ -156,7 +174,7 @@ class FileCache {
       const parsed = JSON.parse(data);
       
       const stats = await fs.stat(filePath);
-      this.streamCache.set(movieId, {
+      this._setLru(this.streamCache, movieId, {
         data: parsed,
         mtime: stats.mtimeMs
       });

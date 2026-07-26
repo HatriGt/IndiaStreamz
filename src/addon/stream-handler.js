@@ -6,26 +6,14 @@ const torboxConfig = require('../utils/torbox-config');
 const tokenManager = require('../utils/token-manager');
 const { encodeMagnet } = require('../utils/magnet-encoder');
 
-// Global storage for query parameters (set by Express middleware)
-// This is a workaround since Stremio doesn't pass query params to handlers
-let globalQueryParams = {};
-
-// Function to set query params (called by Express middleware)
-function setQueryParamsForId(id, params) {
-  globalQueryParams[id] = params;
-}
-
-// Function to get query params for an ID
-function getQueryParamsForId(id) {
-  return globalQueryParams[id] || null;
-}
-
-// Export will be set at the end of the file
-
 /**
  * Handle stream requests for movies and series
  * READ-ONLY from cache - no on-demand scraping
  * If Torbox config is provided, converts magnet links to direct streaming URLs
+ *
+ * TorBox config is read strictly from `extra` (passed per-request by the token
+ * route). No shared module-level state is used, so concurrent users cannot leak
+ * each other's API keys.
  */
 async function handleStream({ type, id, extra }) {
   try {
@@ -48,26 +36,12 @@ async function handleStream({ type, id, extra }) {
     
     logger.info(`[STREAM] Found ${cachedStreams.length} streams in cache for ${type}: ${id}`);
 
-    // Extract Torbox API key - only needed when user plays movie
-    // Priority: 1. extra parameter, 2. global query params (set by stream route from token)
+    // Extract Torbox config - passed per-request via `extra` by the token route.
+    // Only needed when the user plays a movie.
     let torboxApiKey = extra?.torboxApiKey;
     let torboxApiUrl = extra?.torboxApiUrl || constants.TORBOX_API_URL;
     let token = extra?.token;
-    
-    // Check global query params (set by Express middleware from token)
-    if (!torboxApiKey) {
-      const queryParams = getQueryParamsForId(id);
-      if (queryParams) {
-        // Query params already contains torboxApiKey (extracted from token by route)
-        torboxApiKey = queryParams.torboxApiKey;
-        torboxApiUrl = queryParams.torboxApiUrl || constants.TORBOX_API_URL;
-        token = queryParams.token;
-        if (torboxApiKey) {
-          logger.info(`[STREAM] Got Torbox config from token for ${id}`);
-        }
-      }
-    }
-    
+
     // Clean API key: trim whitespace and remove control characters
     if (torboxApiKey) {
       torboxApiKey = torboxApiKey.trim().replace(/[\r\n\t]/g, '');
@@ -216,8 +190,8 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
             url: streamingUrl,
             isCached,
             behaviorHints: {
+              ...(stream.behaviorHints || {}),
               notWebReady: true, // Required when using proxyHeaders
-              bingeGroup: stream.behaviorHints?.bingeGroup,
               proxyHeaders: {
                 request: {
                   'Authorization': `Bearer ${apiKey || ''}`
@@ -234,8 +208,8 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
             url: streamingUrl,
             isCached,
             behaviorHints: {
-              notWebReady: false, // Direct MP4 over HTTPS
-              bingeGroup: stream.behaviorHints?.bingeGroup
+              ...(stream.behaviorHints || {}),
+              notWebReady: false // Direct MP4 over HTTPS
             }
           };
         } else {
@@ -247,8 +221,8 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
             url: streamingUrl,
             isCached,
             behaviorHints: {
-              notWebReady: true,
-              bingeGroup: stream.behaviorHints?.bingeGroup
+              ...(stream.behaviorHints || {}),
+              notWebReady: true
             }
           };
         }
@@ -366,8 +340,5 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
   return allStreams.map(({ isCached, ...stream }) => stream);
 }
 
-// Export handler as default, and utility functions as properties
 module.exports = handleStream;
-module.exports.setQueryParams = setQueryParamsForId;
-module.exports.getQueryParams = getQueryParamsForId;
 
