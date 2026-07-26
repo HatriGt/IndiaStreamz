@@ -47,10 +47,12 @@ async function handleStream({ type, id, extra }) {
       torboxApiKey = torboxApiKey.trim().replace(/[\r\n\t]/g, '');
     }
 
-    // If no Torbox config, return cached streams as-is (infoHash for desktop)
+    // If no Torbox config, return cached streams with infoHash only (single
+    // source field) so the stremio-core deserializer accepts them.
     if (!torboxApiKey) {
       logger.debug(`No Torbox config, returning ${cachedStreams.length} streams with infoHash`);
-      return { streams: cachedStreams };
+      const infoHashOnly = (cachedStreams || []).map(({ externalUrl, url, ...rest }) => rest);
+      return { streams: infoHashOnly };
     }
 
     // Initialize Torbox client
@@ -233,27 +235,29 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
         // Not in mylist or not cached - return proxy URL (will add to Torbox when user plays)
         logger.debug(`Torrent not cached, generating proxy URL (will add to Torbox when user plays)`);
         const proxyUrl = token && encrypted && baseUrl ? generateProxyUrl(magnetLink, token, encrypted, baseUrl) : null;
-        
-        return {
+
+        // Stremio stream objects must expose EXACTLY ONE source field
+        // (url | infoHash | externalUrl | ytId). Mixing them makes the
+        // stremio-core deserializer drop the stream ("No streams were found").
+        const base = {
           name: streamName,
           title: stream.title, // Preserve rich detail line
           description: stream.description, // Preserve description
-          url: proxyUrl || undefined, // Use proxy URL if available
-          infoHash: stream.infoHash, // Keep infoHash as fallback for desktop Stremio
-          externalUrl: magnetLink,
           isCached,
           behaviorHints: stream.behaviorHints
         };
+        return proxyUrl
+          ? { ...base, url: proxyUrl } // debrid/proxy playback
+          : { ...base, infoHash: stream.infoHash }; // torrent fallback (no proxy url available)
       }
     } catch (error) {
-      // Error checking cache: fallback to infoHash
+      // Error checking cache: fallback to infoHash (single source field only)
       logger.error(`Error checking cache for stream:`, error.message);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
         title: stream.title, // Preserve rich detail line
         description: stream.description, // Preserve description
         infoHash: stream.infoHash,
-        externalUrl: stream.externalUrl,
         isCached: false,
         behaviorHints: stream.behaviorHints
       };
@@ -274,7 +278,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
         title: stream.title, // Preserve rich detail line
         description: stream.description, // Preserve description
         infoHash: stream.infoHash,
-        externalUrl: stream.externalUrl,
         isCached: false,
         behaviorHints: stream.behaviorHints
       };
@@ -309,8 +312,11 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
       }
     }
     
+    // Single source field only: these have no proxy url, so keep infoHash and
+    // drop externalUrl/url to satisfy the stremio-core stream deserializer.
+    const { externalUrl, url, ...rest } = stream;
     return {
-      ...stream,
+      ...rest,
       name: formatStreamNameWithEmoji(streamName, isCached),
       isCached
     };
@@ -322,10 +328,11 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
     if (result.status === 'fulfilled') {
       return result.value;
     } else {
-      // If cache check failed, return original stream
+      // If cache check failed, return original stream (single source field only)
       const stream = remainingStreams[index];
+      const { externalUrl, url, ...rest } = stream;
       return {
-        ...stream,
+        ...rest,
         name: formatStreamNameWithEmoji(stream.name, false),
         isCached: false
       };
