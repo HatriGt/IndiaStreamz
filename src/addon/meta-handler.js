@@ -1,6 +1,5 @@
 const fileCache = require('../cache/file-cache');
 const logger = require('../utils/logger');
-const constants = require('../utils/constants');
 
 // Regex to strip zero-width and other invisible chars that break Stremio parsing
 const INVISIBLE_CHARS = /[\u200B-\u200D\uFEFF\u00AD]/g;
@@ -78,10 +77,7 @@ async function handleMeta({ type, id }) {
 
     logger.info(`[META] Returning metadata for ${type}: ${id} (name: ${content.name})`);
     // Sanitize to remove invisible chars that cause Stremio "Failed to parse meta"
-    return {
-      meta: sanitizeMeta(content),
-      cacheMaxAge: constants.META_CACHE_MAX_AGE
-    };
+    return { meta: sanitizeMeta(content) };
   } catch (error) {
     logger.error(`[META] Error in meta handler:`, error);
     return { meta: null };

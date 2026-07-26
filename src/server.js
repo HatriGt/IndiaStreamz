@@ -20,39 +20,11 @@ const torboxConfig = require('./utils/torbox-config');
 const tokenManager = require('./utils/token-manager');
 const proxyStreamHandler = require('./routes/proxy-stream');
 const fileCache = require('./cache/file-cache');
-const { applyCacheHeaders, applyStreamCacheHeaders } = require('./utils/cache-headers');
-
-// Local aliases so route handlers read naturally
-const setStreamCacheHeaders = applyStreamCacheHeaders;
-
-const crypto = require('crypto');
 
 const app = express();
 
 // Trust proxy (for HTTPS detection behind reverse proxy)
 app.set('trust proxy', true);
-
-/**
- * Constant-time comparison of a provided admin secret against the configured
- * RESCRAPE_SECRET_TOKEN. Returns { ok, status, error } so routes can respond
- * consistently. There is no insecure default: if the env var is unset, admin
- * endpoints are disabled.
- */
-function verifyAdminSecret(providedSecret) {
-  const configured = process.env.RESCRAPE_SECRET_TOKEN;
-  if (!configured) {
-    return { ok: false, status: 503, error: 'Admin endpoints are disabled: RESCRAPE_SECRET_TOKEN is not set' };
-  }
-  if (!providedSecret) {
-    return { ok: false, status: 401, error: 'Secret token required. Use ?secret=YOUR_TOKEN' };
-  }
-  const a = Buffer.from(String(providedSecret));
-  const b = Buffer.from(configured);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return { ok: false, status: 403, error: 'Invalid secret token' };
-  }
-  return { ok: true };
-}
 
 // Helper function to get base URL with HTTPS
 function getBaseUrl(req) {
@@ -224,10 +196,22 @@ scheduler.start();
 // Usage: GET /api/rescrape?secret=YOUR_SECRET_TOKEN
 app.get('/api/rescrape', async (req, res) => {
   try {
-    const auth = verifyAdminSecret(req.query.secret);
-    if (!auth.ok) {
-      if (auth.status === 403) logger.warn('[RESCRAPE] Invalid secret token attempt');
-      return res.status(auth.status).json({ success: false, error: auth.error });
+    const secretToken = process.env.RESCRAPE_SECRET_TOKEN || 'changeme';
+    const providedSecret = req.query.secret;
+    
+    if (!providedSecret) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Secret token required. Use ?secret=YOUR_TOKEN' 
+      });
+    }
+    
+    if (providedSecret !== secretToken) {
+      logger.warn('[RESCRAPE] Invalid secret token attempt');
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Invalid secret token' 
+      });
     }
     
     // Check if scrape is already running
@@ -281,8 +265,33 @@ const proxyRateLimiter = rateLimit({
 app.get('/stremio/:token/:encrypted/proxy/:magnetHash', proxyRateLimiter, proxyStreamHandler);
 logger.info('Proxy route registered: /stremio/:token/:encrypted/proxy/:magnetHash');
 
-// TorBox config is passed per-request to the stream handler via `extra` in the
-// explicit token stream route below (no shared middleware state).
+// API key is extracted by middleware and set in query params
+// The stream handler will get it from there
+
+// Middleware to extract token from path and attach to request
+// Handles token-based URLs: /stremio/{token}/{encrypted}/manifest.json or /stremio/{token}/{encrypted}/stream/...
+app.use((req, res, next) => {
+  // Extract token from path if it's a token-based URL
+  const token = tokenManager.extractTokenFromPath(req.path);
+  if (token) {
+    // Attach token to request for handlers to use
+    req.token = token;
+    logger.debug(`[TOKEN] Extracted token from path: ${token.substring(0, 8)}...`);
+  }
+  
+  // For stream requests with token, set it in the handler's query params
+  const streamMatch = req.path.match(/\/stremio\/[^\/]+\/[^\/]+\/stream\/([^\/]+)\/([^\/]+)\.json/);
+  if (streamMatch && token) {
+    const id = streamMatch[2];
+    const tokenConfig = tokenManager.getConfigForToken(token);
+    if (tokenConfig) {
+      streamHandler.setQueryParams(id, { ...tokenConfig, token: token });
+      logger.info(`[TOKEN] Set config from token for ${id}`);
+    }
+  }
+  
+  next();
+});
 
 // Register token-based routes BEFORE serveHTTP to ensure they take precedence
 // Token-based manifest route - validates token and returns manifest
@@ -301,7 +310,7 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   const manifestToServe = getManifestForCatalogs(config.visibleCatalogs);
   const catalogCount = manifestToServe.catalogs.length;
   logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')})`);
-
+  
   // Prevent Stremio from caching manifest so catalog preference changes take effect
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.json(manifestToServe);
@@ -337,7 +346,6 @@ app.get('/stremio/:token/:encrypted/catalog/:type/*', async (req, res) => {
   try {
     const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
-    applyCacheHeaders(res, catalogData);
     res.json(catalogData);
   } catch (error) {
     logger.error('[CATALOG] Error getting catalog:', error);
@@ -357,7 +365,6 @@ app.get('/stremio/:token/:encrypted/meta/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
   try {
     const metaData = await metaHandler({ type, id });
-    applyCacheHeaders(res, metaData);
     res.json(metaData);
   } catch (error) {
     logger.error('[META] Error getting meta:', error);
@@ -368,29 +375,25 @@ app.get('/stremio/:token/:encrypted/meta/:type/:id.json', async (req, res) => {
 app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => {
   const { token, type, id } = req.params;
   logger.debug(`[TOKEN] Stream request with token: ${token.substring(0, 8)}... for ${type}/${id}`);
-
-  // Resolve per-request TorBox config from the token (loaded from file if needed)
+  
+  // Verify token and set config for handler (will load from file if needed)
   const config = tokenManager.getConfigForToken(token);
-  if (!config) {
+  if (config) {
+    streamHandler.setQueryParams(id, { ...config, token: token });
+    logger.info(`[TOKEN] Set config from token for ${id}`);
+  } else {
     logger.warn(`[TOKEN] Invalid token for stream: ${token.substring(0, 8)}...`);
   }
-
+  
   try {
     // Get base URL for proxy URLs
     const baseUrl = getBaseUrl(req);
     const encrypted = req.params.encrypted; // Get encrypted part from URL path
-    const streamData = await streamHandler({
-      type,
-      id,
-      extra: {
-        ...req.query,
-        ...(config || {}),
-        token: token,
-        encrypted: encrypted,
-        baseUrl: baseUrl
-      }
+    const streamData = await streamHandler({ 
+      type, 
+      id, 
+      extra: { ...req.query, token: token, encrypted: encrypted, baseUrl: baseUrl } 
     });
-    setStreamCacheHeaders(res, streamData);
     res.json(streamData);
   } catch (error) {
     logger.error('[STREAM] Error getting streams:', error);
@@ -437,10 +440,22 @@ app.get('/api/cache/list', async (req, res) => {
 // Usage: GET /api/cache/full-replace?secret=YOUR_SECRET_TOKEN
 app.get('/api/cache/full-replace', async (req, res) => {
   try {
-    const auth = verifyAdminSecret(req.query.secret);
-    if (!auth.ok) {
-      if (auth.status === 403) logger.warn('[FULL-REPLACE] Invalid secret token attempt');
-      return res.status(auth.status).json({ success: false, error: auth.error });
+    const secretToken = process.env.RESCRAPE_SECRET_TOKEN || 'changeme';
+    const providedSecret = req.query.secret;
+    
+    if (!providedSecret) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Secret token required. Use ?secret=YOUR_TOKEN' 
+      });
+    }
+    
+    if (providedSecret !== secretToken) {
+      logger.warn('[FULL-REPLACE] Invalid secret token attempt');
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Invalid secret token' 
+      });
     }
     
     // Check if scrape is already running
@@ -509,7 +524,6 @@ app.get('/catalog/:type/*', async (req, res) => {
   try {
     const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[STANDARD CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
-    applyCacheHeaders(res, catalogData);
     res.json(catalogData);
   } catch (error) {
     logger.error('[CATALOG] Error getting catalog:', error);
@@ -523,7 +537,6 @@ app.get('/meta/:type/:id.json', async (req, res) => {
   logger.info(`[STANDARD META] Request for ${type}/${id}`);
   try {
     const metaData = await metaHandler({ type, id });
-    applyCacheHeaders(res, metaData);
     res.json(metaData);
   } catch (error) {
     logger.error('[META] Error getting meta:', error);
@@ -563,7 +576,36 @@ server.listen(constants.PORT, '0.0.0.0', () => {
 // Note: /configure is registered early (before 404 handler) to ensure it's reachable
 // No need to re-register them here
 
+app.get('/stremio/:token/:encrypted/stream/:type/:id.json', async (req, res) => {
+  const { token, type, id } = req.params;
+  logger.debug(`[TOKEN] Stream request with token: ${token.substring(0, 8)}... for ${type}/${id}`);
+
+  const config = tokenManager.getConfigForToken(token);
+  if (config) {
+    streamHandler.setQueryParams(id, { ...config, token: token });
+    logger.info(`[TOKEN] Set config from token for ${id}`);
+  } else {
+    logger.warn(`[TOKEN] Invalid token for stream: ${token.substring(0, 8)}...`);
+  }
+
+  try {
+    // Get base URL for proxy URLs
+    const baseUrl = getBaseUrl(req);
+    const encrypted = req.params.encrypted; // Get encrypted part from URL path
+    const streamData = await streamHandler({ 
+      type, 
+      id, 
+      extra: { ...req.query, token: token, encrypted: encrypted, baseUrl: baseUrl } 
+    });
+    res.json(streamData);
+  } catch (error) {
+    logger.error('[STREAM] Error getting stream:', error);
+    res.status(500).json({ error: 'Failed to get stream' });
+  }
+});
+
 logger.info('Custom routes registered: /configure, /api/create-token, /test, /stremio/:token/:encrypted/*');
+logger.info(`Server should be accessible at: http://localhost:${constants.PORT}/configure`);
 logger.info(`Server should be accessible at: http://localhost:${constants.PORT}/configure`);
 
 // Error handling middleware (after routes)

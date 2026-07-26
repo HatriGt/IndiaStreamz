@@ -11,18 +11,7 @@ const TOKENS_FILE = path.join(__dirname, '../../cache/tokens.json');
 // If ENCRYPTION_KEY env var is set, use it; otherwise use a fixed key
 // Fixed key ensures tokens can be decrypted after server restart
 // Must be exactly 64 hex characters (32 bytes) for AES-256
-const DEV_FALLBACK_KEY_HEX = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-
-// In production, refuse to run with the well-known fallback key: it would let
-// anyone with tokens.json decrypt every user's TorBox API key.
-if (process.env.NODE_ENV === 'production' && !process.env.ENCRYPTION_KEY) {
-  throw new Error(
-    'ENCRYPTION_KEY environment variable is required in production ' +
-    '(64 hex chars / 32 bytes). Refusing to start with the insecure default key.'
-  );
-}
-
-const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY || DEV_FALLBACK_KEY_HEX;
+const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 // Convert hex string to Buffer (32 bytes = 64 hex chars)
 const ENCRYPTION_KEY = Buffer.from(ENCRYPTION_KEY_HEX, 'hex');
 const ALGORITHM = 'aes-256-cbc';

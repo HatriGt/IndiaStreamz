@@ -1,21 +1,5 @@
 const constants = require('../utils/constants');
 
-/**
- * Build a movie catalog definition for a language with search/genre/skip filters.
- */
-function buildCatalog(language) {
-  return {
-    type: 'movie',
-    id: language,
-    name: `${constants.LANGUAGE_NAMES[language]} Movies`,
-    extra: [
-      { name: 'search', isRequired: false },
-      { name: 'genre', isRequired: false, options: constants.CATALOG_GENRES },
-      { name: 'skip', isRequired: false }
-    ]
-  };
-}
-
 const manifest = {
   id: constants.ADDON_ID,
   version: constants.ADDON_VERSION,
@@ -27,7 +11,122 @@ const manifest = {
     'stream'
   ],
   types: ['movie', 'series'],
-  catalogs: Object.values(constants.LANGUAGES).map(buildCatalog),
+  catalogs: [
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.TAMIL,
+      name: `${constants.LANGUAGE_NAMES.tamil} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    },
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.TELUGU,
+      name: `${constants.LANGUAGE_NAMES.telugu} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    },
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.HINDI,
+      name: `${constants.LANGUAGE_NAMES.hindi} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    },
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.MALAYALAM,
+      name: `${constants.LANGUAGE_NAMES.malayalam} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    },
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.KANNADA,
+      name: `${constants.LANGUAGE_NAMES.kannada} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    },
+    {
+      type: 'movie',
+      id: constants.LANGUAGES.ENGLISH,
+      name: `${constants.LANGUAGE_NAMES.english} Movies`,
+      extra: [
+        {
+          name: 'search',
+          isRequired: false
+        },
+        {
+          name: 'genre',
+          isRequired: false
+        },
+        {
+          name: 'skip',
+          isRequired: false
+        }
+      ]
+    }
+  ],
   // Only our catalog IDs - don't include tt/tmdb so we're not asked for content from other addons
   idPrefixes: ['tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
 };

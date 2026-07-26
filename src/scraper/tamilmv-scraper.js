@@ -12,7 +12,6 @@ const {
   detectLanguagesFromTitle,
   detectSeriesFromTitle,
   extractEpisodeRangeFromDescription,
-  extractEpisodeFromText,
   extractQualityFromMagnetText
 } = require('./parsers');
 const {
@@ -268,41 +267,11 @@ class TamilMVScraper {
           // Store series metadata
           result.series[seriesId] = structureSeriesForMeta(contentData);
           
-          // Store episode streams.
-          // Match each scraped stream to an episode number using its magnet
-          // display name / description. Streams that carry no episode marker are
-          // treated as season packs and offered on every episode as a fallback.
-          const allStreams = contentData.streams || [];
-          const streamsByEpisode = new Map();
-          const sharedStreams = [];
-          for (const stream of allStreams) {
-            const epFromMagnet = extractEpisodeFromText(stream.externalUrl || '');
-            const epFromDesc = epFromMagnet == null
-              ? extractEpisodeFromText(stream.description || '')
-              : null;
-            const ep = epFromMagnet != null ? epFromMagnet : epFromDesc;
-            if (ep != null) {
-              if (!streamsByEpisode.has(ep)) streamsByEpisode.set(ep, []);
-              streamsByEpisode.get(ep).push(stream);
-            } else {
-              sharedStreams.push(stream);
-            }
-          }
-
+          // Store episode streams
           for (const episode of seriesInfo.episodes) {
             const episodeStreamId = generateEpisodeStreamId(seriesId, seriesInfo.season, episode);
-            const matched = streamsByEpisode.get(episode) || [];
-            // Prefer episode-specific streams; fall back to shared/season-pack
-            // streams so an episode is never left with nothing to play.
-            const episodeStreams = matched.length > 0 ? matched : sharedStreams;
-            // Tag with a per-series+season binge group so Stremio auto-plays next
-            result.streams[episodeStreamId] = episodeStreams.map(stream => ({
-              ...stream,
-              behaviorHints: {
-                ...(stream.behaviorHints || {}),
-                bingeGroup: `indiastreamz-${seriesId}-s${seriesInfo.season}-${stream.name || 'default'}`
-              }
-            }));
+            // For now, use same streams for all episodes (can be improved later)
+            result.streams[episodeStreamId] = contentData.streams || [];
           }
           
           // Add to language catalogs

@@ -10,13 +10,6 @@ module.exports = {
     ENGLISH: 'english'
   },
   
-  // Genre options offered in catalog filters (TMDB standard genres)
-  CATALOG_GENRES: [
-    'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
-    'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery',
-    'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'
-  ],
-
   LANGUAGE_NAMES: {
     tamil: 'Tamil',
     telugu: 'Telugu',
@@ -36,21 +29,10 @@ module.exports = {
   
   SCRAPE_INTERVAL: '0 */4 * * *', // Every 4 hours
   
-  CACHE_DIR: process.env.CACHE_DIR || 'cache',
-  CACHE_CATALOGS_DIR: `${process.env.CACHE_DIR || 'cache'}/catalogs`,
-  CACHE_MOVIES_DIR: `${process.env.CACHE_DIR || 'cache'}/movies`,
-  CACHE_STREAMS_DIR: `${process.env.CACHE_DIR || 'cache'}/streams`,
-
-  // Max entries kept in each in-memory cache Map (LRU eviction beyond this)
-  MEMORY_CACHE_MAX_ENTRIES: 500,
-
-  // Stremio response cache directives (seconds)
-  CATALOG_CACHE_MAX_AGE: 3600, // 1 hour
-  CATALOG_STALE_REVALIDATE: 14400, // 4 hours
-  CATALOG_STALE_ERROR: 86400, // 1 day
-  META_CACHE_MAX_AGE: 86400, // 1 day (enriched data is stable)
-  STREAM_CACHE_MAX_AGE: 300, // 5 minutes (only when no per-user TorBox URLs)
-  PAGE_SIZE: 100, // Stremio standard catalog page size
+  CACHE_DIR: 'cache',
+  CACHE_CATALOGS_DIR: 'cache/catalogs',
+  CACHE_MOVIES_DIR: 'cache/movies',
+  CACHE_STREAMS_DIR: 'cache/streams',
   
   PORT: process.env.PORT || 3005,
   

@@ -640,35 +640,6 @@ function extractEpisodeRangeFromDescription(description) {
 }
 
 /**
- * Extract a single episode number from arbitrary text (magnet display name or
- * description). Handles common patterns: "EP01", "EP 01", "E01", "Episode 1",
- * "S01E05", "EP(03)". Returns null when no episode marker is found.
- * @param {string} text
- * @returns {number|null}
- */
-function extractEpisodeFromText(text) {
-  if (!text || typeof text !== 'string') return null;
-
-  // SxxEyy (e.g. S01E05) - prefer the episode part
-  const sxxeyy = text.match(/S\d+\s*E\s*\(?\s*(\d+)/i);
-  if (sxxeyy) return parseInt(sxxeyy[1], 10);
-
-  // EP01 / EP 01 / EP(01) / EP-01
-  const ep = text.match(/\bEP\s*[-(]?\s*(\d+)/i);
-  if (ep) return parseInt(ep[1], 10);
-
-  // Episode 1 / Episode-1
-  const episode = text.match(/\bEpisode\s*[-]?\s*(\d+)/i);
-  if (episode) return parseInt(episode[1], 10);
-
-  // Standalone Exx (e.g. E05), avoid matching random letters
-  const eOnly = text.match(/\bE\s*(\d{1,3})\b/);
-  if (eOnly) return parseInt(eOnly[1], 10);
-
-  return null;
-}
-
-/**
  * Extract quality from magnet link description text
  */
 function extractQualityFromMagnetText(text) {
@@ -701,7 +672,6 @@ module.exports = {
   detectLanguagesFromTitle,
   detectSeriesFromTitle,
   extractEpisodeRangeFromDescription,
-  extractEpisodeFromText,
   extractQualityFromMagnetText
 };
 
