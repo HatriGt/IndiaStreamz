@@ -301,10 +301,20 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   const manifestToServe = getManifestForCatalogs(config.visibleCatalogs);
   const catalogCount = manifestToServe.catalogs.length;
   logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')})`);
-  
+
+  // Make the addon id unique per install (per token). stremio-core keys addons
+  // and their resource results by manifest.id; if two installs share the same
+  // id they collide and the detail view can render "No streams were found"
+  // even though streams are fetched and valid. Suffixing with the token keeps
+  // each install distinct.
+  const perInstallManifest = {
+    ...manifestToServe,
+    id: `${constants.ADDON_ID}.${token}`
+  };
+
   // Prevent Stremio from caching manifest so catalog preference changes take effect
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.json(manifestToServe);
+  res.json(perInstallManifest);
 });
 
 // Token-based routes for catalog and meta - directly call handlers
