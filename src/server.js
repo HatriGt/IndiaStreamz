@@ -435,6 +435,39 @@ app.get('/api/cache/list', async (req, res) => {
   }
 });
 
+// TEMP DIAGNOSTIC: inspect stream files for a series id.
+// Usage: GET /api/debug/streams?secret=TOKEN&id=<seriesId>
+app.get('/api/debug/streams', async (req, res) => {
+  try {
+    const auth = verifyAdminSecret(req.query.secret);
+    if (!auth.ok) return res.status(auth.status).json({ success: false, error: auth.error });
+
+    const fsp = require('fs').promises;
+    const streamsDir = constants.CACHE_STREAMS_DIR;
+    const files = await fsp.readdir(streamsDir);
+    const id = req.query.id || '';
+    const matching = id ? files.filter(f => f.startsWith(id)) : [];
+
+    const sample = [];
+    for (const f of matching.slice(0, 5)) {
+      const raw = await fsp.readFile(require('path').join(streamsDir, f), 'utf8');
+      const arr = JSON.parse(raw);
+      sample.push({ file: f, count: Array.isArray(arr) ? arr.length : 'not-array', first: Array.isArray(arr) && arr[0] ? { name: arr[0].name, hasUrl: !!arr[0].externalUrl } : null });
+    }
+
+    res.json({
+      success: true,
+      totalStreamFiles: files.length,
+      seriesEpisodeFiles: files.filter(f => f.includes(':')).length,
+      matchingForId: matching.length,
+      matchingSample: matching.slice(0, 10),
+      sample
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // API endpoint to trigger full replacement scrape (clears cache and rescrapes everything)
 // Usage: GET /api/cache/full-replace?secret=YOUR_SECRET_TOKEN
 app.get('/api/cache/full-replace', async (req, res) => {

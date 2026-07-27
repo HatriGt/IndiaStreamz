@@ -557,21 +557,31 @@ function structureSeriesForCatalog(seriesData) {
  * Structure series metadata for Stremio meta format
  */
 function structureSeriesForMeta(seriesData) {
-  // Build seasons array in Stremio format
-  const seasons = [];
+  // Build the episode list. Stremio renders series episodes from `meta.videos`
+  // (a flat array), NOT from `seasons`; without it the detail page shows no
+  // episodes and streams are unreachable. We keep `seasons` too for clients
+  // that use it, but `videos` is what the web/desktop client requires.
+  const videos = [];
   if (seriesData.season && seriesData.episodes && seriesData.episodes.length > 0) {
-    const episodes = seriesData.episodes.map(ep => ({
-      id: `${seriesData.id}:${seriesData.season}:${ep}`, // Stremio format
-      title: `Episode ${ep}`,
-      season: seriesData.season,
-      episode: ep
-    }));
-    
+    for (const ep of seriesData.episodes) {
+      videos.push({
+        id: `${seriesData.id}:${seriesData.season}:${ep}`, // Stremio stream id format
+        title: `Episode ${ep}`,
+        season: seriesData.season,
+        episode: ep,
+        released: seriesData.released || null
+      });
+    }
+  }
+
+  // Build seasons array in Stremio format (kept for compatibility)
+  const seasons = [];
+  if (videos.length > 0) {
     seasons.push({
       id: `${seriesData.id}:${seriesData.season}`, // Stremio format
       season: seriesData.season,
       title: `Season ${seriesData.season}`,
-      episodes: episodes
+      episodes: videos
     });
   }
   
@@ -640,6 +650,7 @@ function structureSeriesForMeta(seriesData) {
     productionCompanies: productionCompanies,
     spokenLanguages: spokenLanguages,
     website: seriesData.url || seriesData.website || null,
+    videos: videos,
     seasons: seasons
   };
 }

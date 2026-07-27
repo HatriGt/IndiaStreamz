@@ -98,3 +98,22 @@ test('languages[] survives meta -> catalog rebuild (enrichment path)', () => {
   const catalogItem = structureSeriesForCatalog(meta);
   assert.deepEqual(catalogItem.languages, ['tamil', 'hindi']);
 });
+
+test('structureSeriesForMeta emits a flat videos[] array of episodes', () => {
+  // Stremio renders series episodes from meta.videos (not seasons). Each video
+  // id must be the stream lookup id `${seriesId}:${season}:${episode}`.
+  const meta = structureSeriesForMeta({
+    id: 'multi-z-s2', title: 'Z', languages: ['Tamil'], season: 2, episodes: [1, 2, 3]
+  });
+  assert.ok(Array.isArray(meta.videos), 'videos should be an array');
+  assert.equal(meta.videos.length, 3);
+  assert.deepEqual(
+    meta.videos.map(v => v.id),
+    ['multi-z-s2:2:1', 'multi-z-s2:2:2', 'multi-z-s2:2:3']
+  );
+  assert.equal(meta.videos[0].season, 2);
+  assert.equal(meta.videos[0].episode, 1);
+  // seasons kept for compatibility and reuses the same episode objects
+  assert.equal(meta.seasons.length, 1);
+  assert.equal(meta.seasons[0].episodes.length, 3);
+});
