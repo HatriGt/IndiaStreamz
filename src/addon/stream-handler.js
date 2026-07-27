@@ -127,6 +127,49 @@ function sanitizeMagnet(magnet) {
     .replace(/&apos;/gi, "'");
 }
 
+/**
+ * Look up a magnet's cache status using pre-computed signals:
+ *  - infraCacheMap: infoHash -> cached bool (from ONE batch checkcached call)
+ *  - torrentsByHash: infoHash -> torrent object (from the single mylist call)
+ * Returns the same shape as the old per-stream `checkCached`, but with ZERO
+ * additional network calls.
+ */
+function resolveCacheStatus(torbox, magnetLink, infraCacheMap, torrentsByHash) {
+  const infoHash = torbox.extractInfoHash(magnetLink);
+  if (!infoHash) return null;
+
+  const torrent = torrentsByHash.get(infoHash) || null;
+  const infraCached = infraCacheMap.get(infoHash) === true;
+
+  // mylist-based cache signal (mirrors old checkCached logic)
+  let mylistCached = false;
+  if (torrent) {
+    const hasStreamUrl = !!(torrent.hls_url || torrent.stream_url);
+    const status = (torrent.status || torrent.state || '').toLowerCase();
+    const isCompleted = status === 'completed' || status === 'ready' || status === 'cached' || status === 'downloaded';
+    mylistCached = torrent.is_cached === true ||
+                   torrent.is_cached === 1 ||
+                   torrent.cached === true ||
+                   torrent.cached === 1 ||
+                   (hasStreamUrl && isCompleted);
+  }
+
+  const cached = infraCached || mylistCached;
+
+  return {
+    cached,
+    data: torrent ? {
+      torrent_id: torrent.torrent_id || torrent.id,
+      hash: torrent.hash || torrent.info_hash || torrent.infoHash || infoHash,
+      is_cached: torrent.is_cached,
+      cached: torrent.cached,
+      status: torrent.status || torrent.state,
+      hls_url: torrent.hls_url,
+      stream_url: torrent.stream_url
+    } : { hash: infoHash, is_cached: infraCached, cached: infraCached }
+  };
+}
+
 async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) {
   // Defensive: fix HTML-escaped magnets (&amp;) in cached data so stremio-core
   // does not silently drop streams with malformed externalUrl magnet URIs.
@@ -150,6 +193,26 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
   } catch (error) {
     logger.debug(`Failed to fetch mylist, will check individually: ${error.message}`);
   }
+
+  // Index mylist by infoHash once (O(1) lookups instead of scanning per stream).
+  const torrentsByHash = new Map();
+  for (const t of (myTorrents || [])) {
+    const h = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
+    if (h) torrentsByHash.set(h, t);
+  }
+
+  // ONE batch infrastructure cache-status call for ALL magnets, instead of a
+  // separate network round-trip per stream. Results are TTL-memoized in the
+  // client, so repeat stream requests hit zero network.
+  const allMagnets = cachedStreams
+    .map((s) => s.externalUrl)
+    .filter((m) => typeof m === 'string' && m.startsWith('magnet:'));
+  let infraCacheMap = new Map();
+  try {
+    infraCacheMap = await torbox.checkCachedBatch(allMagnets);
+  } catch (error) {
+    logger.debug(`Batch cache check failed, streams will show as not-cached: ${error.message}`);
+  }
   
   // Process all streams in parallel - ONLY CHECK CACHE STATUS, DON'T ADD TORRENTS
   const conversionPromises = streamsToConvert.map(async (stream) => {
@@ -162,10 +225,8 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
         return { ...stream, isCached: false };
       }
 
-      logger.debug(`Checking cache status for magnet: ${magnetLink.substring(0, 50)}...`);
-      
-      // ONLY check if cached - don't add torrents yet
-      const cached = await torbox.checkCached(magnetLink, myTorrents);
+      // Resolve cache status from pre-fetched batch + mylist (no network call)
+      const cached = resolveCacheStatus(torbox, magnetLink, infraCacheMap, torrentsByHash);
       const isCached = cached && cached.cached === true;
       
       // Format stream name with emojis and green checkmark
@@ -292,55 +353,24 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
     }
   });
   
-  // Check cache status for remaining streams in parallel (but don't convert)
-  // Note: myTorrents was already fetched above
-  const cacheCheckPromises = remainingStreams.map(async (stream) => {
-    let streamName = stream.name;
+  // Cache status for remaining streams: resolved synchronously from the batch
+  // + mylist signals already gathered above (no per-stream network calls).
+  const remainingConverted = remainingStreams.map((stream) => {
     let isCached = false;
-    
-    // Check if cached (quick check without conversion)
     if (stream.externalUrl && stream.externalUrl.startsWith('magnet:')) {
-      try {
-        // Pass pre-fetched torrent list to avoid multiple API calls
-        const cached = await torbox.checkCached(stream.externalUrl, myTorrents);
-        // Check is_cached field directly from mylist response (most reliable)
-        isCached = cached && (
-          cached.cached === true ||
-          cached.data?.is_cached === true ||
-          cached.data?.is_cached === 1 ||
-          cached.data?.cached === true
-        );
-        
-        if (isCached) {
-          logger.debug(`Stream is cached: ${streamName.substring(0, 50)}...`);
-        }
-      } catch (error) {
-        // Ignore cache check errors for non-converted streams
-        logger.debug(`Cache check failed for remaining stream: ${error.message}`);
-      }
+      const cached = resolveCacheStatus(torbox, stream.externalUrl, infraCacheMap, torrentsByHash);
+      isCached = !!(cached && (
+        cached.cached === true ||
+        cached.data?.is_cached === true ||
+        cached.data?.is_cached === 1 ||
+        cached.data?.cached === true
+      ));
     }
-    
     return {
       ...stream,
-      name: formatStreamNameWithEmoji(streamName, isCached),
+      name: formatStreamNameWithEmoji(stream.name, isCached),
       isCached
     };
-  });
-  
-  // Wait for all cache checks in parallel
-  const remainingResults = await Promise.allSettled(cacheCheckPromises);
-  const remainingConverted = remainingResults.map((result, index) => {
-    if (result.status === 'fulfilled') {
-      return result.value;
-    } else {
-      // If cache check failed, return original stream
-      const stream = remainingStreams[index];
-      return {
-        ...stream,
-        name: formatStreamNameWithEmoji(stream.name, false),
-        isCached: false
-      };
-    }
   });
   
   // Combine all streams

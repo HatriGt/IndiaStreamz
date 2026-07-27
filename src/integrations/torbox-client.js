@@ -31,6 +31,101 @@ class TorboxClient {
   }
 
   /**
+   * Process-wide TTL cache for infrastructure cache-status lookups, keyed by
+   * lowercase infoHash. TorBox itself caches checkcached for ~1h, so mirroring
+   * that here means repeated Stremio stream requests avoid the network entirely.
+   * Shared across client instances (static) since cache status is per-torrent,
+   * not per-user.
+   */
+  static _infraCache = new Map(); // hash -> { cached: boolean, expires: number }
+  static INFRA_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour, matches TorBox server-side cache
+
+  static _getCachedInfra(hash) {
+    const entry = TorboxClient._infraCache.get(hash);
+    if (entry && entry.expires > Date.now()) {
+      return entry.cached;
+    }
+    if (entry) {
+      TorboxClient._infraCache.delete(hash); // expired
+    }
+    return undefined;
+  }
+
+  static _setCachedInfra(hash, cached) {
+    TorboxClient._infraCache.set(hash, {
+      cached,
+      expires: Date.now() + TorboxClient.INFRA_CACHE_TTL_MS
+    });
+  }
+
+  /**
+   * Batch-check infrastructure cache status for many magnets in a SINGLE request.
+   * Replaces N individual checkcached calls with one comma-separated GET
+   * (TorBox handles ~100 hashes/call in <1s). Results are memoized in the
+   * process-wide TTL cache so subsequent requests skip the network.
+   *
+   * @param {string[]} magnetLinks
+   * @returns {Promise<Map<string, boolean>>} lowercase infoHash -> cached bool
+   */
+  async checkCachedBatch(magnetLinks) {
+    const result = new Map();
+    const hashesToFetch = [];
+
+    for (const magnet of magnetLinks) {
+      const hash = this.extractInfoHash(magnet);
+      if (!hash) continue;
+      const cached = TorboxClient._getCachedInfra(hash);
+      if (cached !== undefined) {
+        result.set(hash, cached); // TTL cache hit
+      } else if (!hashesToFetch.includes(hash)) {
+        hashesToFetch.push(hash);
+      }
+    }
+
+    if (hashesToFetch.length === 0) {
+      return result;
+    }
+
+    // Seed every to-fetch hash as false; flip to true for any TorBox reports.
+    for (const hash of hashesToFetch) {
+      result.set(hash, false);
+    }
+
+    try {
+      // format=list is the most performant per TorBox docs. Response:
+      // { success, data: [ { hash, name, size }, ... ] } — presence => cached.
+      const response = await this.client.get('/api/torrents/checkcached', {
+        params: { hash: hashesToFetch.join(','), format: 'list' }
+      });
+
+      const data = response.data?.data;
+      const cachedHashes = new Set();
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const h = (item?.hash || '').toLowerCase();
+          if (h) cachedHashes.add(h);
+        }
+      } else if (data && typeof data === 'object') {
+        // Defensive: handle format=object shape too ({ [hash]: {...} })
+        for (const key of Object.keys(data)) {
+          if (data[key]) cachedHashes.add(key.toLowerCase());
+        }
+      }
+
+      for (const hash of hashesToFetch) {
+        const isCached = cachedHashes.has(hash);
+        result.set(hash, isCached);
+        TorboxClient._setCachedInfra(hash, isCached);
+      }
+    } catch (error) {
+      logger.debug(`Torbox: batch checkcached failed, treating as not-cached: ${error.response?.data ? JSON.stringify(error.response.data) : error.message}`);
+      // Leave seeded `false` values; do NOT poison the TTL cache on error.
+    }
+
+    return result;
+  }
+
+  /**
    * Add magnet link to Torbox
    * @param {string} magnetLink - Magnet link to add
    * @returns {Promise<Object|null>} - Returns torrent info or null on failure
