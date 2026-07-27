@@ -456,11 +456,15 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     // Format description with all details
     const description = formatStreamDescription(details);
 
-    // BISECT step 1: re-add behaviorHints.filename on top of known-good shape.
-    // (videoSize and stream.title still excluded until this proves safe.)
+    // BISECT step 2: re-add behaviorHints.videoSize + filename.
+    // (stream.title still excluded until this proves safe.)
     const behaviorHints = {
       bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
     };
+    const videoSize = details ? sizeStringToBytes(details.size) : null;
+    if (Number.isFinite(videoSize) && videoSize > 0) {
+      behaviorHints.videoSize = videoSize;
+    }
     const filename = extractFilenameFromMagnet(magnet);
     if (filename) {
       behaviorHints.filename = filename;
