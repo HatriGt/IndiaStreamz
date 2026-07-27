@@ -529,6 +529,12 @@ function structureSeriesForCatalog(seriesData) {
     }
   }
   
+  // Normalize detected languages to lowercase keys so the consolidated series
+  // catalog can filter by the `language` dropdown value.
+  const languages = Array.isArray(seriesData.languages)
+    ? seriesData.languages.map((l) => String(l).toLowerCase())
+    : [];
+
   return {
     id: seriesData.id || '',
     type: 'series',
@@ -536,6 +542,7 @@ function structureSeriesForCatalog(seriesData) {
     poster: seriesData.poster || null,
     description: description || null,
     genres: genres,
+    languages: languages,
     releaseInfo: seriesData.releaseInfo || null,
     director: director,
     cast: cast,

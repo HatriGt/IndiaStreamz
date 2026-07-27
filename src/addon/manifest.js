@@ -16,6 +16,22 @@ function buildCatalog(language) {
   };
 }
 
+/**
+ * Single consolidated series catalog across all languages. The `language`
+ * filter renders as a dropdown; 'All' (default) shows every series.
+ */
+const seriesCatalog = {
+  type: 'series',
+  id: 'series',
+  name: 'Series',
+  extra: [
+    { name: 'search', isRequired: false },
+    { name: 'language', isRequired: false, options: constants.CATALOG_LANGUAGE_OPTIONS },
+    { name: 'genre', isRequired: false, options: constants.CATALOG_GENRES },
+    { name: 'skip', isRequired: false }
+  ]
+};
+
 const manifest = {
   id: constants.ADDON_ID,
   version: constants.ADDON_VERSION,
@@ -27,7 +43,7 @@ const manifest = {
     'stream'
   ],
   types: ['movie', 'series'],
-  catalogs: Object.values(constants.LANGUAGES).map(buildCatalog),
+  catalogs: [...Object.values(constants.LANGUAGES).map(buildCatalog), seriesCatalog],
   // Only our catalog IDs - don't include tt/tmdb so we're not asked for content from other addons
   idPrefixes: ['tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
 };

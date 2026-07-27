@@ -25,6 +25,12 @@ module.exports = {
     kannada: 'Kannada',
     english: 'English'
   },
+
+  // Dropdown options for the consolidated series catalog's `language` filter.
+  // 'All' (first, the default) shows every series across languages.
+  CATALOG_LANGUAGE_OPTIONS: [
+    'All', 'Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English'
+  ],
   
   QUALITIES: {
     '4K': '4K',

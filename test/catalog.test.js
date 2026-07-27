@@ -13,6 +13,7 @@ const fileCache = require('../src/cache/file-cache');
 
 const catalogsDir = path.resolve(constants.CACHE_CATALOGS_DIR);
 const tamilFile = path.join(catalogsDir, 'tamil.json');
+const teluguFile = path.join(catalogsDir, 'telugu.json');
 
 // Build a catalog with 150 movies so we can assert 100-item pagination
 function seedCatalog() {
@@ -26,8 +27,20 @@ function seedCatalog() {
       genres: i % 2 === 0 ? ['Action'] : ['Comedy']
     });
   }
+  // Series live alongside movies in the per-language catalog files. One shared
+  // series (S-shared) is multi-language (tamil+telugu) to test dedupe.
+  items.push({ id: 'tamil-series-A', type: 'series', name: 'Tamil Series A', genres: ['Drama'], languages: ['tamil'] });
+  items.push({ id: 'series-shared', type: 'series', name: 'Shared Series', genres: ['Action'], languages: ['tamil', 'telugu'] });
   fs.writeFileSync(tamilFile, JSON.stringify(items), 'utf8');
+
+  fs.writeFileSync(teluguFile, JSON.stringify([
+    { id: 'telugu-movie-0', type: 'movie', name: 'Telugu Movie', genres: ['Action'] },
+    { id: 'telugu-series-B', type: 'series', name: 'Telugu Series B', genres: ['Comedy'], languages: ['telugu'] },
+    { id: 'series-shared', type: 'series', name: 'Shared Series', genres: ['Action'], languages: ['tamil', 'telugu'] }
+  ]), 'utf8');
+
   fileCache.clearCatalogCache('tamil');
+  fileCache.clearCatalogCache('telugu');
 }
 
 test.before(() => seedCatalog());
@@ -66,6 +79,44 @@ test('invalid language returns empty', async () => {
   assert.deepEqual(res.metas, []);
 });
 
+// --- Consolidated series catalog ---
+
+test('series catalog with no language shows ALL series, deduped', async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: {} });
+  const ids = res.metas.map(m => m.id).sort();
+  // A (tamil), B (telugu), shared (appears once despite being in both files)
+  assert.deepEqual(ids, ['series-shared', 'tamil-series-A', 'telugu-series-B']);
+});
+
+test("series catalog language='All' behaves like no filter", async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: { language: 'All' } });
+  assert.equal(res.metas.length, 3);
+});
+
+test('series catalog filters by language (Tamil)', async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: { language: 'Tamil' } });
+  const ids = res.metas.map(m => m.id).sort();
+  assert.deepEqual(ids, ['series-shared', 'tamil-series-A']); // shared is tamil+telugu
+});
+
+test('series catalog filters by language (Telugu)', async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: { language: 'Telugu' } });
+  const ids = res.metas.map(m => m.id).sort();
+  assert.deepEqual(ids, ['series-shared', 'telugu-series-B']);
+});
+
+test('series catalog language + genre filters combine', async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: { language: 'Tamil', genre: 'Action' } });
+  const ids = res.metas.map(m => m.id);
+  assert.deepEqual(ids, ['series-shared']); // only shared is Tamil AND Action
+});
+
+test('series catalog returns cache directives', async () => {
+  const res = await catalogHandler({ type: 'series', id: 'series', extra: {} });
+  assert.equal(res.cacheMaxAge, constants.CATALOG_CACHE_MAX_AGE);
+});
+
 test.after(() => {
   try { fs.unlinkSync(tamilFile); } catch { /* ignore */ }
+  try { fs.unlinkSync(teluguFile); } catch { /* ignore */ }
 });

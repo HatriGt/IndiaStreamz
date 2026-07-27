@@ -27,6 +27,7 @@ const { applyCacheHeaders, applyStreamCacheHeaders } = require('./utils/cache-he
 const setStreamCacheHeaders = applyStreamCacheHeaders;
 
 const crypto = require('crypto');
+const { parseCatalogWildcard } = require('./utils/catalog-path');
 
 const app = express();
 
@@ -319,26 +320,12 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 app.get('/stremio/:token/:encrypted/catalog/:type/*', async (req, res) => {
   const { type } = req.params;
   const wildcard = req.params[0] || ''; // Everything after /catalog/:type/
-  
-  // Parse the wildcard path to extract catalog ID and search parameter
-  // Format: telugu/search=akhandha%202.json or just telugu.json
-  let id = wildcard;
-  let extra = { ...req.query };
-  
-  // Remove .json extension if present
-  if (id.endsWith('.json')) {
-    id = id.slice(0, -5);
-  }
-  
-  // Check if search parameter is in the path
-  const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
-  if (searchMatch) {
-    id = searchMatch[1]; // Extract the actual catalog ID
-    extra.search = decodeURIComponent(searchMatch[2]); // Extract and decode search term
-    logger.info(`[TOKEN CATALOG] Extracted search from path: "${extra.search}" for catalog ${id}`);
-  }
-  
-  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(extra)}`);
+
+  // Parse catalog id + extra filters (search/genre/language/skip) from the
+  // querystring-in-path segment Stremio sends.
+  const { id, extra } = parseCatalogWildcard(wildcard, req.query);
+
+  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Extra: ${JSON.stringify(extra)}`);
   try {
     const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
@@ -491,26 +478,12 @@ serveHTTP(addonInterface, {
 app.get('/catalog/:type/*', async (req, res) => {
   const { type } = req.params;
   const wildcard = req.params[0] || ''; // Everything after /catalog/:type/
-  
-  // Parse the wildcard path to extract catalog ID and search parameter
-  // Format: telugu/search=akhandha%202.json or just telugu.json
-  let id = wildcard;
-  let extra = { ...req.query };
-  
-  // Remove .json extension if present
-  if (id.endsWith('.json')) {
-    id = id.slice(0, -5);
-  }
-  
-  // Check if search parameter is in the path
-  const searchMatch = id.match(/^(.+?)\/search=(.+)$/);
-  if (searchMatch) {
-    id = searchMatch[1]; // Extract the actual catalog ID
-    extra.search = decodeURIComponent(searchMatch[2]); // Extract and decode search term
-    logger.info(`[STANDARD CATALOG] Extracted search from path: "${extra.search}" for catalog ${id}`);
-  }
-  
-  logger.info(`[STANDARD CATALOG] Request for ${type}/${id} - Query: ${JSON.stringify(extra)}`);
+
+  // Parse catalog id + extra filters (search/genre/language/skip) from the
+  // querystring-in-path segment Stremio sends.
+  const { id, extra } = parseCatalogWildcard(wildcard, req.query);
+
+  logger.info(`[STANDARD CATALOG] Request for ${type}/${id} - Extra: ${JSON.stringify(extra)}`);
   try {
     const catalogData = await catalogHandler({ type, id, extra });
     logger.info(`[STANDARD CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
