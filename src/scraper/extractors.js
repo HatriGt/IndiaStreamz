@@ -626,6 +626,11 @@ function structureSeriesForMeta(seriesData) {
     language: seriesData.languages && Array.isArray(seriesData.languages) && seriesData.languages.length > 0
       ? seriesData.languages.join(', ')
       : null,
+    // Preserve the raw language array so the consolidated series catalog can
+    // filter by language after TMDB enrichment rebuilds the catalog item.
+    languages: Array.isArray(seriesData.languages)
+      ? seriesData.languages.map((l) => String(l).toLowerCase())
+      : [],
     originalLanguage: seriesData.originalLanguage || null,
     country: seriesData.country || null,
     tagline: seriesData.tagline || null,

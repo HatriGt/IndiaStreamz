@@ -10,7 +10,9 @@ const {
   sizeStringToBytes,
   extractFilenameFromMagnet,
   structureStreamsForStremio,
-  cleanTitleForDisplay
+  cleanTitleForDisplay,
+  structureSeriesForCatalog,
+  structureSeriesForMeta
 } = require('../src/scraper/extractors');
 
 const HASH = 'dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c';
@@ -75,4 +77,24 @@ test('cleanTitleForDisplay strips year, language, technical noise', () => {
   assert.ok(!/2023/.test(cleaned));
   assert.ok(!/tamil/i.test(cleaned));
   assert.ok(/Leo/i.test(cleaned));
+});
+
+test('structureSeriesForCatalog carries lowercased languages[]', () => {
+  const item = structureSeriesForCatalog({
+    id: 'multi-x-s1', title: 'X', languages: ['Tamil', 'Telugu'], genres: ['Action']
+  });
+  assert.deepEqual(item.languages, ['tamil', 'telugu']);
+});
+
+test('languages[] survives meta -> catalog rebuild (enrichment path)', () => {
+  // Mirrors the scraper: structureSeriesForMeta output is later fed back into
+  // structureSeriesForCatalog after TMDB enrichment. languages[] must persist.
+  const meta = structureSeriesForMeta({
+    id: 'multi-y-s1', title: 'Y', languages: ['Tamil', 'Hindi'], season: 1, episodes: [1, 2]
+  });
+  assert.deepEqual(meta.languages, ['tamil', 'hindi']);
+  assert.equal(meta.language, 'Tamil, Hindi'); // display string still present
+
+  const catalogItem = structureSeriesForCatalog(meta);
+  assert.deepEqual(catalogItem.languages, ['tamil', 'hindi']);
 });
