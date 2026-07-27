@@ -15,6 +15,10 @@ const catalogCheckboxesHtml = CATALOG_OPTIONS.map(c =>
   `<label class="checkbox-label"><input type="checkbox" name="catalog" value="${c.id}" checked> ${c.name} Movies</label>`
 ).join('');
 
+const seriesLangCheckboxesHtml = CATALOG_OPTIONS.map(c =>
+  `<label class="checkbox-label"><input type="checkbox" name="seriesLang" value="${c.id}" checked> ${c.name}</label>`
+).join('');
+
 module.exports = (req, res) => {
   try {
     logger.info('[CONFIGURE] Route handler called');
@@ -95,7 +99,7 @@ module.exports = (req, res) => {
     .loading { display: none; color: var(--brand); font-size: 14px; margin-top: 10px; }
     .catalog-group { margin: 16px 0; }
     .catalog-group .section-label { font-weight: 600; margin-bottom: 12px; font-size: 14px; }
-    #catalogCheckboxes, #updateCatalogCheckboxes { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    #catalogCheckboxes, #updateCatalogCheckboxes, #seriesLangCheckboxes, #updateSeriesLangCheckboxes { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
     .checkbox-label {
       display: flex; align-items: center; gap: 9px; margin: 0; font-weight: 500; font-size: 14px;
       background: var(--bg-input); border: 1px solid var(--border); padding: 11px 13px; border-radius: 10px;
@@ -118,7 +122,7 @@ module.exports = (req, res) => {
     #toast.ok { border-color: var(--accent); }
     #toast.err { border-color: var(--danger); }
     @media (max-width: 480px) {
-      #catalogCheckboxes, #updateCatalogCheckboxes { grid-template-columns: 1fr; }
+      #catalogCheckboxes, #updateCatalogCheckboxes, #seriesLangCheckboxes, #updateSeriesLangCheckboxes { grid-template-columns: 1fr; }
       .logo { font-size: 26px; }
     }
   </style>
@@ -148,9 +152,15 @@ module.exports = (req, res) => {
       </div>
       
       <div class="form-group catalog-group">
-        <div class="section-label">Catalogs to display (uncheck to hide):</div>
+        <div class="section-label">Movie catalogs to display (uncheck to hide):</div>
         <div id="catalogCheckboxes">${catalogCheckboxesHtml}</div>
-        <div class="info">Only checked catalogs will appear in Stremio. Leave all checked to show everything.</div>
+        <div class="info">Only checked movie catalogs will appear in Stremio. Leave all checked to show everything.</div>
+      </div>
+
+      <div class="form-group catalog-group">
+        <div class="section-label">Series languages (shown in the Series row):</div>
+        <div id="seriesLangCheckboxes">${seriesLangCheckboxesHtml}</div>
+        <div class="info">The single Series row shows only series in these languages. You can still pick any language from its dropdown to see more. Leave all checked to show every language.</div>
       </div>
       
       <button type="submit">Generate Addon URL</button>
@@ -183,8 +193,12 @@ module.exports = (req, res) => {
           <button type="button" id="loadPrefsBtn" class="load-btn">Load current preferences</button>
         </div>
         <div class="form-group catalog-group">
-          <div class="section-label">Catalogs to display:</div>
+          <div class="section-label">Movie catalogs to display:</div>
           <div id="updateCatalogCheckboxes">${catalogCheckboxesHtml}</div>
+        </div>
+        <div class="form-group catalog-group">
+          <div class="section-label">Series languages (shown in the Series row):</div>
+          <div id="updateSeriesLangCheckboxes">${seriesLangCheckboxesHtml}</div>
         </div>
         <button type="submit">Update Preferences</button>
         <div class="loading" id="updateLoading">Updating...</div>
@@ -221,6 +235,9 @@ module.exports = (req, res) => {
       const checkboxes = document.querySelectorAll('#catalogCheckboxes input[name="catalog"]:checked');
       const checked = Array.from(checkboxes).map(cb => cb.value);
       const visibleCatalogs = (checked.length === allCatalogIds.length || checked.length === 0) ? [] : checked;
+
+      const seriesChecked = Array.from(document.querySelectorAll('#seriesLangCheckboxes input[name="seriesLang"]:checked')).map(cb => cb.value);
+      const seriesLanguages = (seriesChecked.length === allCatalogIds.length || seriesChecked.length === 0) ? [] : seriesChecked;
       
       const loadingEl = document.getElementById('loading');
       const resultEl = document.getElementById('result');
@@ -234,7 +251,7 @@ module.exports = (req, res) => {
         const response = await fetch('/api/create-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ torboxApiKey: apiKey, visibleCatalogs: visibleCatalogs })
+          body: JSON.stringify({ torboxApiKey: apiKey, visibleCatalogs: visibleCatalogs, seriesLanguages: seriesLanguages })
         });
         
         const data = await response.json();
@@ -283,6 +300,16 @@ module.exports = (req, res) => {
         checkboxes.forEach(cb => { cb.checked = set.has(cb.value); });
       }
     }
+
+    function setUpdateSeriesLangCheckboxes(seriesLanguages) {
+      const checkboxes = document.querySelectorAll('#updateSeriesLangCheckboxes input[name="seriesLang"]');
+      if (!seriesLanguages || seriesLanguages.length === 0) {
+        checkboxes.forEach(cb => cb.checked = true);
+      } else {
+        const set = new Set(seriesLanguages);
+        checkboxes.forEach(cb => { cb.checked = set.has(cb.value); });
+      }
+    }
     
     document.getElementById('loadPrefsBtn').addEventListener('click', async function() {
       const addonUrl = document.getElementById('addonUrlInput').value.trim();
@@ -296,6 +323,7 @@ module.exports = (req, res) => {
         const data = await res.json();
         if (data.success) {
           setUpdateCheckboxes(data.visibleCatalogs);
+          setUpdateSeriesLangCheckboxes(data.seriesLanguages);
           showToast('Preferences loaded', 'ok');
         } else {
           showToast('Could not load: ' + (data.error || 'Invalid token'), 'err');
@@ -318,6 +346,9 @@ module.exports = (req, res) => {
       const checkboxes = document.querySelectorAll('#updateCatalogCheckboxes input[name="catalog"]:checked');
       const checked = Array.from(checkboxes).map(cb => cb.value);
       const visibleCatalogs = (checked.length === allCatalogIds.length || checked.length === 0) ? [] : checked;
+
+      const seriesChecked = Array.from(document.querySelectorAll('#updateSeriesLangCheckboxes input[name="seriesLang"]:checked')).map(cb => cb.value);
+      const seriesLanguages = (seriesChecked.length === allCatalogIds.length || seriesChecked.length === 0) ? [] : seriesChecked;
       
       const loadingEl = document.getElementById('updateLoading');
       const resultEl = document.getElementById('updateResult');
@@ -331,7 +362,7 @@ module.exports = (req, res) => {
         const response = await fetch('/api/update-token-catalogs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: token, visibleCatalogs: visibleCatalogs })
+          body: JSON.stringify({ token: token, visibleCatalogs: visibleCatalogs, seriesLanguages: seriesLanguages })
         });
         
         const data = await response.json();

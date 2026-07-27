@@ -3,9 +3,18 @@ const logger = require('../utils/logger');
 const constants = require('../utils/constants');
 
 /**
- * Build the consolidated series list across all languages, deduped by id, then
- * filtered by the `language` dropdown value ('All'/absent => every series).
- * @param {object} extra - request extra props (may include `language`)
+ * Build the consolidated series list across all languages, deduped by id.
+ *
+ * Filtering precedence:
+ *   1. An explicit `language` dropdown value (not 'All') always wins — the user
+ *      is deliberately overriding, so show exactly that language.
+ *   2. Otherwise, if the token was configured with a subset of series languages
+ *      (`extra.configuredSeriesLanguages`), the single Series row defaults to an
+ *      any-match over those languages.
+ *   3. Otherwise ('All'/absent + no config) show every series.
+ *
+ * @param {object} extra - request extra props. May include `language` (dropdown)
+ *   and `configuredSeriesLanguages` (lowercase ids from the token config).
  * @returns {Promise<Array>} series catalog items
  */
 async function getConsolidatedSeries(extra) {
@@ -22,14 +31,25 @@ async function getConsolidatedSeries(extra) {
 
   let series = Array.from(byId.values());
 
-  // Language filter: 'All' or missing shows everything.
   const selected = extra && extra.language;
+  const configured = extra && Array.isArray(extra.configuredSeriesLanguages)
+    ? extra.configuredSeriesLanguages.map(l => String(l).toLowerCase())
+    : [];
+
   if (selected && selected !== 'All') {
+    // Explicit dropdown pick overrides the configured default.
     const wanted = String(selected).toLowerCase();
     series = series.filter(item =>
       Array.isArray(item.languages) && item.languages.includes(wanted)
     );
     logger.debug(`Filtered series catalog by language "${selected}": ${series.length} results`);
+  } else if (configured.length > 0) {
+    // Default view limited to the configured languages (any-match).
+    const wanted = new Set(configured);
+    series = series.filter(item =>
+      Array.isArray(item.languages) && item.languages.some(l => wanted.has(l))
+    );
+    logger.debug(`Filtered series catalog by configured languages [${configured.join(', ')}]: ${series.length} results`);
   }
 
   return series;

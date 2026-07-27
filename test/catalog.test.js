@@ -116,6 +116,51 @@ test('series catalog returns cache directives', async () => {
   assert.equal(res.cacheMaxAge, constants.CATALOG_CACHE_MAX_AGE);
 });
 
+// --- Configured series languages (per-token default for the Series row) ---
+
+test('configuredSeriesLanguages limits the default Series row (any-match)', async () => {
+  const res = await catalogHandler({
+    type: 'series', id: 'series', extra: { configuredSeriesLanguages: ['telugu'] }
+  });
+  const ids = res.metas.map(m => m.id).sort();
+  // telugu-series-B (telugu) + series-shared (tamil+telugu); NOT tamil-only A
+  assert.deepEqual(ids, ['series-shared', 'telugu-series-B']);
+});
+
+test('configuredSeriesLanguages with multiple langs unions results', async () => {
+  const res = await catalogHandler({
+    type: 'series', id: 'series', extra: { configuredSeriesLanguages: ['tamil', 'telugu'] }
+  });
+  assert.equal(res.metas.length, 3); // all three
+});
+
+test('explicit language dropdown OVERRIDES configuredSeriesLanguages', async () => {
+  // Configured to telugu, but user picks Tamil -> show Tamil set, not telugu.
+  const res = await catalogHandler({
+    type: 'series', id: 'series',
+    extra: { language: 'Tamil', configuredSeriesLanguages: ['telugu'] }
+  });
+  const ids = res.metas.map(m => m.id).sort();
+  assert.deepEqual(ids, ['series-shared', 'tamil-series-A']);
+});
+
+test("language='All' with config still applies the configured default", async () => {
+  // 'All' means "no explicit pick", so the configured default should apply.
+  const res = await catalogHandler({
+    type: 'series', id: 'series',
+    extra: { language: 'All', configuredSeriesLanguages: ['tamil'] }
+  });
+  const ids = res.metas.map(m => m.id).sort();
+  assert.deepEqual(ids, ['series-shared', 'tamil-series-A']);
+});
+
+test('empty configuredSeriesLanguages shows everything', async () => {
+  const res = await catalogHandler({
+    type: 'series', id: 'series', extra: { configuredSeriesLanguages: [] }
+  });
+  assert.equal(res.metas.length, 3);
+});
+
 test.after(() => {
   try { fs.unlinkSync(tamilFile); } catch { /* ignore */ }
   try { fs.unlinkSync(teluguFile); } catch { /* ignore */ }

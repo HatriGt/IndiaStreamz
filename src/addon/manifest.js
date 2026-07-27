@@ -49,19 +49,22 @@ const manifest = {
 };
 
 /**
- * Get manifest filtered by visible catalogs
- * @param {string[]} [visibleCatalogs] - Array of catalog IDs to show. Empty/undefined = show all
+ * Get manifest filtered by visible catalogs.
+ * @param {string[]} [visibleCatalogs] - Catalog IDs to show. Empty/undefined = show all
  * @returns {object} Manifest with filtered catalogs
+ *
+ * Note: the series catalog's `language` dropdown always offers the full option
+ * list. Per-token `seriesLanguages` limits the CONTENT of the series row (the
+ * default any-match set) in the catalog handler, not the dropdown here.
  */
 function getManifestForCatalogs(visibleCatalogs) {
   if (!Array.isArray(visibleCatalogs) || visibleCatalogs.length === 0) {
     return manifest;
   }
   const visibleSet = new Set(visibleCatalogs);
-  const filteredCatalogs = manifest.catalogs.filter(cat => visibleSet.has(cat.id));
   return {
     ...manifest,
-    catalogs: filteredCatalogs
+    catalogs: manifest.catalogs.filter((cat) => visibleSet.has(cat.id))
   };
 }
 

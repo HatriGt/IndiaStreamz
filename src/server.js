@@ -138,7 +138,7 @@ app.get('/configure', configureHandler);
 // API endpoint to create token and generate addon URL
 app.post('/api/create-token', async (req, res) => {
   try {
-    let { torboxApiKey, torboxApiUrl, visibleCatalogs } = req.body;
+    let { torboxApiKey, torboxApiUrl, visibleCatalogs, seriesLanguages } = req.body;
     
     if (!torboxApiKey) {
       return res.status(400).json({ success: false, error: 'Torbox API key is required' });
@@ -155,7 +155,8 @@ app.post('/api/create-token', async (req, res) => {
     const { token, encrypted } = await tokenManager.createToken(
       torboxApiKey,
       torboxApiUrl || constants.TORBOX_API_URL,
-      visibleCatalogs
+      visibleCatalogs,
+      seriesLanguages
     );
     
     // Generate unique addon URL with token
@@ -179,13 +180,13 @@ app.post('/api/create-token', async (req, res) => {
 // API endpoint to update catalog visibility for existing token
 app.post('/api/update-token-catalogs', async (req, res) => {
   try {
-    const { token, visibleCatalogs } = req.body;
+    const { token, visibleCatalogs, seriesLanguages } = req.body;
     
     if (!token) {
       return res.status(400).json({ success: false, error: 'Token is required' });
     }
     
-    const updated = await tokenManager.updateTokenCatalogs(token, visibleCatalogs);
+    const updated = await tokenManager.updateTokenCatalogs(token, visibleCatalogs, seriesLanguages);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Invalid token' });
     }
@@ -214,7 +215,8 @@ app.get('/api/token-config', async (req, res) => {
     // Return only non-sensitive config (catalog preferences)
     res.json({
       success: true,
-      visibleCatalogs: config.visibleCatalogs || []
+      visibleCatalogs: config.visibleCatalogs || [],
+      seriesLanguages: config.seriesLanguages || []
     });
   } catch (error) {
     logger.error(`[TOKEN] Failed to get token config:`, error);
@@ -303,10 +305,11 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
     return res.status(404).json({ error: 'Invalid token' });
   }
   
-  // Filter catalogs based on user preference
+  // Filter catalogs based on user preference. Note: seriesLanguages limits the
+  // CONTENT of the series row in the catalog handler, not the manifest here.
   const manifestToServe = getManifestForCatalogs(config.visibleCatalogs);
   const catalogCount = manifestToServe.catalogs.length;
-  logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')})`);
+  logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')}, seriesLanguages: ${JSON.stringify(config.seriesLanguages || 'all')})`);
   
   // Prevent Stremio from caching manifest so catalog preference changes take effect
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -318,12 +321,19 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
 // Handle catalog routes with flexible ID matching (to support search in path)
 // Use wildcard to capture everything after /catalog/:type/
 app.get('/stremio/:token/:encrypted/catalog/:type/*', async (req, res) => {
-  const { type } = req.params;
+  const { token, type } = req.params;
   const wildcard = req.params[0] || ''; // Everything after /catalog/:type/
 
   // Parse catalog id + extra filters (search/genre/language/skip) from the
   // querystring-in-path segment Stremio sends.
   const { id, extra } = parseCatalogWildcard(wildcard, req.query);
+
+  // Inject the token's configured series languages so the single Series row
+  // defaults to that any-match set (unless the user picked a specific language).
+  const tokenConfig = tokenManager.getConfigForToken(token);
+  if (tokenConfig && Array.isArray(tokenConfig.seriesLanguages) && tokenConfig.seriesLanguages.length > 0) {
+    extra.configuredSeriesLanguages = tokenConfig.seriesLanguages;
+  }
 
   logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Extra: ${JSON.stringify(extra)}`);
   try {

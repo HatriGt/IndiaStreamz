@@ -74,8 +74,9 @@ function generateToken() {
  * @param {string} torboxApiKey - Torbox API key
  * @param {string} torboxApiUrl - Torbox API URL
  * @param {string[]} [visibleCatalogs] - Array of catalog IDs to show (e.g. ['tamil','telugu']). Empty/undefined = show all
+ * @param {string[]} [seriesLanguages] - Lowercase language ids offered in the series dropdown. Empty/undefined = all
  */
-async function createToken(torboxApiKey, torboxApiUrl, visibleCatalogs) {
+async function createToken(torboxApiKey, torboxApiUrl, visibleCatalogs, seriesLanguages) {
   const token = generateToken();
   const encrypted = encrypt(torboxApiKey);
   
@@ -84,6 +85,7 @@ async function createToken(torboxApiKey, torboxApiUrl, visibleCatalogs) {
     torboxApiKey: torboxApiKey, // Store plaintext in memory for quick access
     torboxApiUrl: torboxApiUrl,
     visibleCatalogs: Array.isArray(visibleCatalogs) ? visibleCatalogs : undefined,
+    seriesLanguages: Array.isArray(seriesLanguages) ? seriesLanguages : undefined,
     encrypted: encrypted, // Store encrypted for persistence
     createdAt: new Date().toISOString()
   };
@@ -96,13 +98,18 @@ async function createToken(torboxApiKey, torboxApiUrl, visibleCatalogs) {
 }
 
 /**
- * Update catalog visibility for an existing token
+ * Update catalog visibility (and optionally series languages) for an existing token.
+ * `seriesLanguages` is only updated when an array is provided, so existing
+ * callers that pass just visibleCatalogs leave it untouched.
  */
-async function updateTokenCatalogs(token, visibleCatalogs) {
+async function updateTokenCatalogs(token, visibleCatalogs, seriesLanguages) {
   if (!tokensCache[token]) {
     return false;
   }
   tokensCache[token].visibleCatalogs = Array.isArray(visibleCatalogs) ? visibleCatalogs : undefined;
+  if (seriesLanguages !== undefined) {
+    tokensCache[token].seriesLanguages = Array.isArray(seriesLanguages) ? seriesLanguages : undefined;
+  }
   await saveTokens();
   logger.info(`[TOKEN] Updated catalogs for token: ${token.substring(0, 8)}...`);
   return true;
@@ -116,7 +123,8 @@ function getConfigForToken(token) {
     return {
       torboxApiKey: tokensCache[token].torboxApiKey,
       torboxApiUrl: tokensCache[token].torboxApiUrl,
-      visibleCatalogs: tokensCache[token].visibleCatalogs
+      visibleCatalogs: tokensCache[token].visibleCatalogs,
+      seriesLanguages: tokensCache[token].seriesLanguages
     };
   }
   return null;
@@ -135,6 +143,7 @@ async function saveTokens() {
         encrypted: config.encrypted,
         torboxApiUrl: config.torboxApiUrl,
         visibleCatalogs: config.visibleCatalogs,
+        seriesLanguages: config.seriesLanguages,
         createdAt: config.createdAt
       };
     }
@@ -163,6 +172,7 @@ async function loadTokens() {
           torboxApiKey: decryptedKey,
           torboxApiUrl: config.torboxApiUrl,
           visibleCatalogs: config.visibleCatalogs,
+          seriesLanguages: config.seriesLanguages,
           encrypted: config.encrypted,
           createdAt: config.createdAt
         };
