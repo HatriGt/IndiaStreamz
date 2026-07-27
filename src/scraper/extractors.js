@@ -456,8 +456,17 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     // Format description with all details
     const description = formatStreamDescription(details);
 
-    // BISECT step 2: re-add behaviorHints.videoSize + filename.
-    // (stream.title still excluded until this proves safe.)
+    // BISECT step 3: re-add stream.title (rich single-line detail).
+    const titleParts = [];
+    if (details && details.size) titleParts.push(details.size);
+    if (details && details.source) titleParts.push(details.source);
+    if (details && details.codec) titleParts.push(details.codec);
+    if (details && details.hdr) titleParts.push('HDR');
+    if (details && details.dv) titleParts.push('DV');
+    if (details && details.atmos) titleParts.push('Atmos');
+    if (details && details.audio) titleParts.push(details.audio);
+    const title = titleParts.length > 0 ? `${quality} • ${titleParts.join(' • ')}` : quality;
+
     const behaviorHints = {
       bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
     };
@@ -475,6 +484,7 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     // We include externalUrl as fallback for web users to download manually
     const streamObj = {
       name: quality, // Just quality - cache tick will be added in stream-handler
+      title, // Rich detail line shown under the name
       infoHash: infoHash, // Stremio desktop will handle the torrent using this
       externalUrl: magnet, // Fallback: magnet link for manual download (web users)
       behaviorHints
