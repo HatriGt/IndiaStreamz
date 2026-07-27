@@ -456,8 +456,9 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     // Format description with all details
     const description = formatStreamDescription(details);
 
-    // BISECT: re-add behaviorHints.videoSize + filename together (both are
-    // standard optional hints). stream.title still excluded (prime suspect).
+    // behaviorHints: videoSize + filename help Stremio display/select the file.
+    // NOTE: do NOT add a stream `title` field — title combined with description
+    // makes stremio-core (web) silently reject the whole stream list.
     const behaviorHints = {
       bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
     };
