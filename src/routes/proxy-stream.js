@@ -127,8 +127,9 @@ async function proxyStreamHandler(req, res) {
         return res.redirect(302, url);
       }
       
-      // For cached torrents, try getStreamingUrl directly (it will use createstream which works)
-      // Cached torrents should be ready immediately, so no need to wait
+      // For cached torrents, getStreamingUrl uses createstream (which works
+      // immediately for cached torrents) with its own requestdl fallbacks, so
+      // no extra mylist re-fetch or direct createstream call is needed here.
       const streamingUrl = await torbox.getStreamingUrl(torrentId);
       if (streamingUrl) {
         logger.info(`[PROXY] Got streaming URL for cached torrent, redirecting: ${streamingUrl.substring(0, 50)}...`);
@@ -136,52 +137,8 @@ async function proxyStreamHandler(req, res) {
         logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
         return res.redirect(302, streamingUrl);
       }
-      
-      // If still no URL, check mylist one more time (might have been added to account)
-      logger.debug(`[PROXY] Cached torrent but no URL yet, checking mylist again...`);
-      try {
-        const updatedTorrents = await torbox.getMyTorrents();
-        if (infoHash) {
-          const torrent = updatedTorrents.find(t => {
-            const torrentHash = (t.hash || t.info_hash || t.infoHash || '').toLowerCase();
-            return torrentHash === infoHash.toLowerCase();
-          });
-          
-          if (torrent && (torrent.hls_url || torrent.stream_url)) {
-            const url = torrent.hls_url || torrent.stream_url;
-            logger.info(`[PROXY] Found streaming URL in mylist for cached torrent, redirecting: ${url.substring(0, 50)}...`);
-            const duration = Date.now() - startTime;
-            logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
-            return res.redirect(302, url);
-          }
-        }
-      } catch (error) {
-        logger.debug(`[PROXY] Error checking mylist: ${error.message}`);
-      }
-      
-      // Last resort: try createstream directly (bypass getStreamingUrl fallbacks)
-      logger.debug(`[PROXY] Trying createstream directly for cached torrent...`);
-      try {
-        const streamResponse = await torbox.client.get('/api/stream/createstream', {
-          params: {
-            id: torrentId,
-            file_id: 0,
-            type: 'torrent'
-          }
-        });
-        
-        if (streamResponse.data && streamResponse.data.data && streamResponse.data.data.hls_url) {
-          const url = streamResponse.data.data.hls_url;
-          logger.info(`[PROXY] Got streaming URL via direct createstream, redirecting: ${url.substring(0, 50)}...`);
-          const duration = Date.now() - startTime;
-          logger.info(`[PROXY] Request completed in ${duration}ms (cached)`);
-          return res.redirect(302, url);
-        }
-      } catch (error) {
-        logger.debug(`[PROXY] Direct createstream also failed: ${error.message}`);
-      }
-      
-      logger.warn(`[PROXY] Cached torrent but couldn't get streaming URL after all attempts`);
+
+      logger.warn(`[PROXY] Cached torrent but couldn't get streaming URL`);
       return res.status(500).json({ error: 'Failed to get streaming URL for cached torrent' });
     }
     

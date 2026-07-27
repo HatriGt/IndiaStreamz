@@ -3,6 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const constants = require('../utils/constants');
 const cacheKeys = require('./cache-keys');
+const { sanitizeMeta } = require('../utils/sanitize-meta');
 
 class FileCache {
   constructor() {
@@ -266,13 +267,13 @@ class FileCache {
         }
       }
 
-      // Write movies
+      // Write movies (sanitized at write-time so meta reads are a pure echo)
       if (data.movies) {
         for (const [movieId, movieData] of Object.entries(data.movies)) {
           const tempPath = path.join(this.moviesDir, `${movieId}.json.tmp`);
           const finalPath = path.join(this.moviesDir, `${movieId}.json`);
           
-          await fs.writeFile(tempPath, JSON.stringify(movieData, null, 2), 'utf8');
+          await fs.writeFile(tempPath, JSON.stringify(sanitizeMeta(movieData), null, 2), 'utf8');
           tempFiles.push(tempPath);
           finalFiles.push({ temp: tempPath, final: finalPath, movieId });
         }
@@ -284,7 +285,7 @@ class FileCache {
           const tempPath = path.join(this.moviesDir, `${seriesId}.json.tmp`);
           const finalPath = path.join(this.moviesDir, `${seriesId}.json`);
           
-          await fs.writeFile(tempPath, JSON.stringify(seriesData, null, 2), 'utf8');
+          await fs.writeFile(tempPath, JSON.stringify(sanitizeMeta(seriesData), null, 2), 'utf8');
           tempFiles.push(tempPath);
           finalFiles.push({ temp: tempPath, final: finalPath, movieId: seriesId });
         }
