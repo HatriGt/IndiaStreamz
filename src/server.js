@@ -525,6 +525,29 @@ app.get('/manifest.json', (req, res) => {
   res.json(manifest);
 });
 
+// Build/version marker + live self-test of the series-language handler.
+// Used to confirm exactly which code is running in a deployment.
+app.get('/api/version', async (req, res) => {
+  const marker = 'series-lang-v2';
+  let selfTest = null;
+  try {
+    const sample = await catalogHandler({
+      type: 'series', id: 'series',
+      extra: { configuredSeriesLanguages: ['tamil'] }
+    });
+    const langs = new Set();
+    (sample.metas || []).forEach(m => (m.languages || []).forEach(l => langs.add(l)));
+    const leaked = [...langs].filter(l => l !== 'tamil' && l !== 'telugu');
+    selfTest = {
+      count: (sample.metas || []).length,
+      handlerHonorsConfig: leaked.length === 0
+    };
+  } catch (e) {
+    selfTest = { error: e.message };
+  }
+  res.json({ marker, selfTest });
+});
+
 // 404 handler to catch unmatched requests and log them (must be last, before server starts)
 app.use((req, res) => {
   // Only log Stremio-related 404s
