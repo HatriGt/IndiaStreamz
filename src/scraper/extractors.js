@@ -456,11 +456,19 @@ function structureStreamsForStremio(magnetLinks, magnetDescriptions = [], qualit
     // Format description with all details
     const description = formatStreamDescription(details);
 
-    // BISECT: keep stream object shape identical to last-known-good (054a065).
-    // Only bingeGroup in behaviorHints; no title/videoSize/filename yet.
+    // BISECT: re-add behaviorHints.videoSize + filename together (both are
+    // standard optional hints). stream.title still excluded (prime suspect).
     const behaviorHints = {
       bingeGroup: `tamilmv-${infoHash.substring(0, 8)}`
     };
+    const videoSize = details ? sizeStringToBytes(details.size) : null;
+    if (Number.isFinite(videoSize) && videoSize > 0) {
+      behaviorHints.videoSize = videoSize;
+    }
+    const filename = extractFilenameFromMagnet(magnet);
+    if (filename) {
+      behaviorHints.filename = filename;
+    }
 
     // For torrents, Stremio requires infoHash (works in desktop app)
     // Note: Web player doesn't support torrents - users need desktop app
