@@ -62,9 +62,10 @@ test('structureStreamsForStremio builds stream objects with known-good shape', (
   const s = streams[0];
   assert.equal(s.infoHash, HASH);
   assert.ok(typeof s.externalUrl === 'string' && s.externalUrl.startsWith('magnet:'));
-  assert.ok(typeof s.title === 'string' && s.title.includes('17.8GB'));
-  assert.ok(s.behaviorHints.videoSize > 0);
-  assert.ok(typeof s.behaviorHints.filename === 'string');
+  // Bisect: stream shape matches last-known-good (054a065) — no title/videoSize/filename.
+  assert.equal(s.title, undefined);
+  assert.equal(s.behaviorHints.videoSize, undefined);
+  assert.equal(s.behaviorHints.filename, undefined);
   assert.ok(typeof s.behaviorHints.bingeGroup === 'string');
 });
 

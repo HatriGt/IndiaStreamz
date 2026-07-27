@@ -203,7 +203,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to streaming URL with auth headers: ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
-            title: stream.title, // Preserve rich detail line
             description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
@@ -222,7 +221,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to direct video URL: ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
-            title: stream.title, // Preserve rich detail line
             description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
@@ -236,7 +234,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           logger.debug(`Successfully converted to streaming URL (unknown format): ${streamingUrl.substring(0, 50)}...`);
           return {
             name: streamName,
-            title: stream.title, // Preserve rich detail line
             description: stream.description, // Preserve description
             url: streamingUrl,
             isCached,
@@ -253,7 +250,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
         
         return {
           name: streamName,
-          title: stream.title, // Preserve rich detail line
           description: stream.description, // Preserve description
           url: proxyUrl || undefined, // Use proxy URL if available
           infoHash: stream.infoHash, // Keep infoHash as fallback for desktop Stremio
@@ -267,7 +263,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
       logger.error(`Error checking cache for stream:`, error.message);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
-        title: stream.title, // Preserve rich detail line
         description: stream.description, // Preserve description
         infoHash: stream.infoHash,
         externalUrl: stream.externalUrl,
@@ -288,7 +283,6 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
       logger.error(`Stream conversion failed:`, result.reason);
       return {
         name: formatStreamNameWithEmoji(stream.name, false),
-        title: stream.title, // Preserve rich detail line
         description: stream.description, // Preserve description
         infoHash: stream.infoHash,
         externalUrl: stream.externalUrl,
