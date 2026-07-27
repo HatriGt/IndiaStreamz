@@ -6,6 +6,7 @@ try {
 }
 
 const express = require('express');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const logger = require('./utils/logger');
@@ -66,6 +67,10 @@ function getBaseUrl(req) {
   const host = req.get('X-Forwarded-Host') || req.get('host') || 'localhost:3005';
   return `${secureProtocol}://${host}`;
 }
+
+// Gzip responses (catalog/meta/stream JSON). No effect on 302 redirects, so
+// the playback proxy path is unaffected.
+app.use(compression());
 
 // Parse JSON bodies for API endpoints
 app.use(express.json());

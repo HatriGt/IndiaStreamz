@@ -1,7 +1,14 @@
 const axios = require('axios');
+const http = require('http');
+const https = require('https');
 const FormData = require('form-data');
 const logger = require('../utils/logger');
 const constants = require('../utils/constants');
+
+// Shared keep-alive agents so repeated TorBox calls reuse TCP/TLS connections
+// instead of paying a fresh handshake (~100-300ms) every request.
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true });
 
 /**
  * Torbox API Client
@@ -23,6 +30,8 @@ class TorboxClient {
     this.client = axios.create({
       baseURL: this.baseUrl,
       timeout: 10000, // 10 seconds for individual requests
+      httpAgent: keepAliveHttpAgent,
+      httpsAgent: keepAliveHttpsAgent,
       headers: {
         'Authorization': `Bearer ${this.apiKey}`
         // Note: Don't set Content-Type for multipart/form-data - axios will set it with boundary
@@ -142,6 +151,9 @@ class TorboxClient {
           headers: formData.getHeaders()
         });
         logger.debug(`Torbox: Added magnet, response:`, response.data);
+        // Adding a torrent changes mylist; drop the cached list so the next
+        // getMyTorrents() (e.g. proxy route locating the new torrent) is fresh.
+        TorboxClient._mylistCache.delete(this.apiKey);
         return response.data;
       } catch (err) {
         logger.debug(`Torbox: createtorrent failed, trying asynccreatetorrent:`, err.response?.data || err.message);
@@ -154,6 +166,7 @@ class TorboxClient {
             headers: asyncFormData.getHeaders()
           });
           logger.debug(`Torbox: Added magnet (async), response:`, response.data);
+          TorboxClient._mylistCache.delete(this.apiKey);
           return response.data;
         } catch (asyncErr) {
           logger.error(`Torbox: Both endpoints failed. createtorrent:`, err.response?.data || err.message);
@@ -179,14 +192,29 @@ class TorboxClient {
   }
 
   /**
-   * Get all torrents from mylist (cached for reuse)
+   * Get all torrents from mylist, with a short per-API-key TTL cache so a
+   * stream-list request and the play request that follows it seconds later
+   * share a single network fetch. Keyed by API key since each user's list
+   * differs. TTL is short (~10s) so newly-added torrents surface quickly.
    * @returns {Promise<Array>} - Returns array of torrents
    */
+  static _mylistCache = new Map(); // apiKey -> { torrents, expires }
+  static MYLIST_CACHE_TTL_MS = 10 * 1000;
+
   async getMyTorrents() {
+    const cached = TorboxClient._mylistCache.get(this.apiKey);
+    if (cached && cached.expires > Date.now()) {
+      return cached.torrents;
+    }
     try {
       const response = await this.client.get('/api/torrents/mylist');
       const torrents = response.data?.data || response.data?.torrents || response.data || [];
-      return Array.isArray(torrents) ? torrents : [];
+      const list = Array.isArray(torrents) ? torrents : [];
+      TorboxClient._mylistCache.set(this.apiKey, {
+        torrents: list,
+        expires: Date.now() + TorboxClient.MYLIST_CACHE_TTL_MS
+      });
+      return list;
     } catch (error) {
       logger.error(`Torbox: Error getting my torrents:`, error.response?.data || error.message);
       return [];
