@@ -116,7 +116,24 @@ function formatStreamNameWithEmoji(streamName, isCached) {
   return `${cachedIndicator}${streamName}`;
 }
 
+function sanitizeMagnet(magnet) {
+  if (typeof magnet !== 'string') return magnet;
+  return magnet
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/gi, "'")
+    .replace(/&apos;/gi, "'");
+}
+
 async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) {
+  // Defensive: fix HTML-escaped magnets (&amp;) in cached data so stremio-core
+  // does not silently drop streams with malformed externalUrl magnet URIs.
+  cachedStreams = cachedStreams.map((s) =>
+    s && s.externalUrl ? { ...s, externalUrl: sanitizeMagnet(s.externalUrl) } : s
+  );
+
   // Limit to first 5 streams to avoid rate limiting
   // User can still see all streams, but only top 5 will be converted
   const streamsToConvert = cachedStreams.slice(0, 5);

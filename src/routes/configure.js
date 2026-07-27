@@ -28,33 +28,116 @@ module.exports = (req, res) => {
 <html>
 <head>
   <title>IndiaStreamz Configuration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
-    .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    :root {
+      --bg: #0b0f1a;
+      --bg-elev: #141b2d;
+      --bg-input: #0f1626;
+      --border: #26304a;
+      --border-focus: #6c8cff;
+      --text: #e6ebf5;
+      --text-dim: #9aa6bf;
+      --brand: #6c8cff;
+      --brand-2: #b46cff;
+      --accent: #23d18b;
+      --danger: #ff6b6b;
+      --radius: 14px;
+      --shadow: 0 20px 60px rgba(0,0,0,.45);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0; padding: 40px 18px 64px; color: var(--text);
+      background:
+        radial-gradient(1100px 520px at 15% -10%, rgba(108,140,255,.20), transparent 60%),
+        radial-gradient(900px 480px at 100% 0%, rgba(180,108,255,.16), transparent 55%),
+        var(--bg);
+      min-height: 100vh; line-height: 1.55;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    .hero { text-align: center; margin-bottom: 28px; }
+    .logo {
+      display: inline-flex; align-items: center; gap: 10px; font-weight: 800;
+      font-size: 30px; letter-spacing: -0.02em;
+      background: linear-gradient(90deg, var(--brand), var(--brand-2));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .logo .dot { width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow: 0 0 18px rgba(108,140,255,.8); }
+    .tagline { color: var(--text-dim); margin-top: 8px; font-size: 15px; }
+    .features { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 4px; }
+    .chip { font-size: 12.5px; color: var(--text-dim); background: var(--bg-elev); border: 1px solid var(--border); padding: 6px 12px; border-radius: 999px; }
+    .container { background: var(--bg-elev); padding: 28px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
+    h1 { display: none; }
+    h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -0.01em; }
+    p { color: var(--text-dim); margin: 0 0 18px; }
     .form-group { margin-bottom: 20px; }
-    label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
-    input[type="text"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-    input:focus { outline: none; border-color: #4CAF50; }
-    button { background: #4CAF50; color: white; padding: 12px 24px; border: none; cursor: pointer; border-radius: 4px; font-size: 16px; }
-    button:hover { background: #45a049; }
-    .result { margin-top: 25px; padding: 20px; background: #f0f0f0; border-radius: 5px; }
-    .url { word-break: break-all; background: white; padding: 12px; border-radius: 3px; font-family: monospace; font-size: 12px; border: 1px solid #ddd; }
-    .copy-btn { margin-top: 10px; background: #2196F3; }
-    .copy-btn:hover { background: #1976D2; }
-    .info { color: #666; font-size: 14px; margin-top: 5px; }
-    .loading { display: none; color: #4CAF50; }
-    .catalog-group { margin: 15px 0; }
-    .catalog-group .section-label { font-weight: bold; margin-bottom: 10px; }
-    .checkbox-label { display: inline-block; margin-right: 15px; margin-bottom: 8px; font-weight: normal; }
-    .checkbox-label input { margin-right: 5px; }
-    .divider { border-top: 1px solid #ddd; margin: 30px 0; padding-top: 15px; }
-    .load-btn { margin-top: 8px; background: #757575; padding: 8px 16px; font-size: 14px; }
-    .load-btn:hover { background: #616161; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--text); font-size: 14px; }
+    input[type="text"] {
+      width: 100%; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px;
+      font-size: 14px; background: var(--bg-input); color: var(--text); transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="text"]::placeholder { color: #5c6885; }
+    input[type="text"]:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(108,140,255,.18); }
+    button {
+      background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; padding: 13px 22px;
+      border: none; cursor: pointer; border-radius: 10px; font-size: 15px; font-weight: 700;
+      transition: transform .08s ease, filter .15s ease; width: 100%;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .6; cursor: not-allowed; filter: none; }
+    .result { margin-top: 22px; padding: 20px; background: var(--bg-input); border-radius: 12px; border: 1px solid var(--border); }
+    .url { word-break: break-all; background: #0a1020; padding: 13px; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; border: 1px solid var(--border); color: var(--brand); }
+    .copy-btn { margin-top: 12px; background: linear-gradient(135deg, #2b3a63, #3a2b63); }
+    .info { color: var(--text-dim); font-size: 13px; margin-top: 6px; }
+    .loading { display: none; color: var(--brand); font-size: 14px; margin-top: 10px; }
+    .catalog-group { margin: 16px 0; }
+    .catalog-group .section-label { font-weight: 600; margin-bottom: 12px; font-size: 14px; }
+    #catalogCheckboxes, #updateCatalogCheckboxes { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    .checkbox-label {
+      display: flex; align-items: center; gap: 9px; margin: 0; font-weight: 500; font-size: 14px;
+      background: var(--bg-input); border: 1px solid var(--border); padding: 11px 13px; border-radius: 10px;
+      cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .checkbox-label:hover { border-color: var(--border-focus); }
+    .checkbox-label input { margin: 0; width: 17px; height: 17px; accent-color: var(--brand); cursor: pointer; }
+    .divider { border-top: 1px solid var(--border); margin: 30px 0 0; padding-top: 24px; }
+    .load-btn { margin-top: 10px; background: linear-gradient(135deg, #2b3a63, #3a2b63); width: auto; padding: 10px 16px; font-size: 13.5px; }
+    ol { color: var(--text-dim); padding-left: 20px; }
+    ol li { margin: 4px 0; }
+    .footer { text-align: center; color: #55607d; font-size: 12.5px; margin-top: 26px; }
+    #toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+      background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
+      padding: 13px 18px; border-radius: 12px; box-shadow: var(--shadow); font-size: 14px; font-weight: 600;
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 50; max-width: 90vw;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.ok { border-color: var(--accent); }
+    #toast.err { border-color: var(--danger); }
+    @media (max-width: 480px) {
+      #catalogCheckboxes, #updateCatalogCheckboxes { grid-template-columns: 1fr; }
+      .logo { font-size: 26px; }
+    }
   </style>
 </head>
 <body>
+  <div class="wrap">
+  <div class="hero">
+    <div class="logo"><span class="dot"></span>IndiaStreamz</div>
+    <div class="tagline">Tamil, Telugu, Hindi, Malayalam, Kannada &amp; English movies &mdash; streamed via TorBox, right inside Stremio.</div>
+    <div class="features">
+      <span class="chip">6 languages</span>
+      <span class="chip">Quality-labeled streams</span>
+      <span class="chip">TorBox powered</span>
+      <span class="chip">Genre filtering</span>
+    </div>
+  </div>
   <div class="container">
     <h1>IndiaStreamz Configuration</h1>
+    <h3>Generate your addon URL</h3>
     <p>Enter your Torbox API key to generate a unique addon URL:</p>
     
     <form id="configForm">
@@ -112,8 +195,18 @@ module.exports = (req, res) => {
       </div>
     </div>
   </div>
+  <div class="footer">Your addon URL contains an encrypted token &mdash; keep it private.</div>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
   
   <script>
+    function showToast(msg, kind) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'show' + (kind ? ' ' + kind : '');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(function() { t.className = t.className.replace('show', '').trim(); }, 2600);
+    }
     const allCatalogIds = ${JSON.stringify(CATALOG_OPTIONS.map(c => c.id))};
     
     document.getElementById('configForm').addEventListener('submit', async function(e) {
@@ -121,7 +214,7 @@ module.exports = (req, res) => {
       const apiKey = document.getElementById('torboxApiKey').value.trim();
       
       if (!apiKey) {
-        alert('Please enter your Torbox API key');
+        showToast('Please enter your Torbox API key', 'err');
         return;
       }
       
@@ -149,11 +242,12 @@ module.exports = (req, res) => {
         if (data.success && data.addonUrl) {
           document.getElementById('addonUrl').textContent = data.addonUrl;
           resultEl.style.display = 'block';
+          showToast('Addon URL generated', 'ok');
         } else {
-          alert('Failed to generate URL: ' + (data.error || 'Unknown error'));
+          showToast('Failed to generate URL: ' + (data.error || 'Unknown error'), 'err');
         }
       } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'err');
       } finally {
         loadingEl.style.display = 'none';
         submitBtn.disabled = false;
@@ -163,7 +257,7 @@ module.exports = (req, res) => {
     function copyUrl() {
       const url = document.getElementById('addonUrl').textContent;
       navigator.clipboard.writeText(url).then(() => {
-        alert('URL copied to clipboard!');
+        showToast('URL copied to clipboard', 'ok');
       }).catch(() => {
         const textArea = document.createElement('textarea');
         textArea.value = url;
@@ -171,7 +265,7 @@ module.exports = (req, res) => {
         textArea.select();
         document.execCommand('copy');
         document.body.removeChild(textArea);
-        alert('URL copied to clipboard!');
+        showToast('URL copied to clipboard', 'ok');
       });
     }
     
@@ -194,7 +288,7 @@ module.exports = (req, res) => {
       const addonUrl = document.getElementById('addonUrlInput').value.trim();
       const token = extractTokenFromUrl(addonUrl);
       if (!token) {
-        alert('Please paste your addon URL first');
+        showToast('Please paste your addon URL first', 'err');
         return;
       }
       try {
@@ -202,11 +296,12 @@ module.exports = (req, res) => {
         const data = await res.json();
         if (data.success) {
           setUpdateCheckboxes(data.visibleCatalogs);
+          showToast('Preferences loaded', 'ok');
         } else {
-          alert('Could not load: ' + (data.error || 'Invalid token'));
+          showToast('Could not load: ' + (data.error || 'Invalid token'), 'err');
         }
       } catch (e) {
-        alert('Error loading preferences');
+        showToast('Error loading preferences', 'err');
       }
     });
     
@@ -216,7 +311,7 @@ module.exports = (req, res) => {
       const token = extractTokenFromUrl(addonUrl);
       
       if (!token) {
-        alert('Invalid addon URL. Please paste your full addon URL (e.g. https://.../stremio/.../manifest.json)');
+        showToast('Invalid addon URL. Paste your full manifest URL', 'err');
         return;
       }
       
@@ -243,11 +338,12 @@ module.exports = (req, res) => {
         
         if (data.success) {
           resultEl.style.display = 'block';
+          showToast('Preferences updated', 'ok');
         } else {
-          alert('Failed to update: ' + (data.error || 'Unknown error'));
+          showToast('Failed to update: ' + (data.error || 'Unknown error'), 'err');
         }
       } catch (error) {
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'err');
       } finally {
         loadingEl.style.display = 'none';
         submitBtn.disabled = false;

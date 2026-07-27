@@ -352,6 +352,24 @@ function extractQualities(text) {
 /**
  * Find magnet links in HTML content
  */
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;/gi, "'")
+    .replace(/&apos;/gi, "'");
+}
+
+function addMagnet(magnets, raw) {
+  if (!raw) return;
+  const cleaned = decodeHtmlEntities(raw.trim());
+  if (cleaned.startsWith('magnet:') && !magnets.includes(cleaned)) {
+    magnets.push(cleaned);
+  }
+}
+
 function findMagnetLinks(html) {
   const $ = cheerio.load(html);
   const magnets = [];
@@ -362,11 +380,7 @@ function findMagnetLinks(html) {
     let href = $elem.attr('href') || $elem.attr('data-href') || $elem.attr('data-magnet');
     
     if (href && href.startsWith('magnet:')) {
-      // Clean up the magnet link
-      href = href.trim();
-      if (!magnets.includes(href)) {
-        magnets.push(href);
-      }
+      addMagnet(magnets, href);
     }
   });
   
@@ -380,24 +394,17 @@ function findMagnetLinks(html) {
     // Extract magnet from onclick
     const onclickMatch = onclick.match(/magnet:\?[^\s"'<>]+/i);
     if (onclickMatch) {
-      const magnet = onclickMatch[0].trim();
-      if (!magnets.includes(magnet)) {
-        magnets.push(magnet);
-      }
+      addMagnet(magnets, onclickMatch[0]);
     }
     
     // Check data-href
     if (dataHref.startsWith('magnet:')) {
-      if (!magnets.includes(dataHref)) {
-        magnets.push(dataHref);
-      }
+      addMagnet(magnets, dataHref);
     }
     
     // Check href
     if (href.startsWith('magnet:')) {
-      if (!magnets.includes(href)) {
-        magnets.push(href);
-      }
+      addMagnet(magnets, href);
     }
   });
   
@@ -408,10 +415,7 @@ function findMagnetLinks(html) {
   
   if (matches) {
     for (const match of matches) {
-      const cleaned = match.trim();
-      if (cleaned.startsWith('magnet:') && !magnets.includes(cleaned)) {
-        magnets.push(cleaned);
-      }
+      addMagnet(magnets, match);
     }
   }
   
@@ -421,10 +425,7 @@ function findMagnetLinks(html) {
     const codeMatches = text.match(/magnet:\?[^\s]+/gi);
     if (codeMatches) {
       for (const match of codeMatches) {
-        const cleaned = match.trim();
-        if (!magnets.includes(cleaned)) {
-          magnets.push(cleaned);
-        }
+        addMagnet(magnets, match);
       }
     }
   });
