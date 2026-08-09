@@ -65,14 +65,14 @@ class ScraperScheduler {
     const startTime = Date.now();
 
     try {
-      logger.info('=== Starting scheduled scrape (cache will be cleared first) ===');
-      
-      // Clear existing cache before scraping fresh data
-      logger.info('Clearing existing cache...');
-      await fileCache.clear();
-      
-      // Scrape all languages and movies
-      const scrapedData = await this.scraper.scrapeAll();
+      logger.info('=== Starting scheduled scrape (existing cache retained until scrape succeeds) ===');
+
+      // Scrape all languages and movies FIRST. The existing cache is left intact
+      // so that a failed or empty scrape can never wipe the live catalog.
+      // Use skipCacheCheck=true so the scrape rebuilds the FULL catalog (matching
+      // the previous clear-then-scrape-everything behaviour); otherwise already
+      // cached items would be skipped and the atomic replace below would drop them.
+      const scrapedData = await this.scraper.scrapeAll(true);
       
       // Validate data structure
       if (!scrapedData || typeof scrapedData !== 'object') {
@@ -88,11 +88,15 @@ class ScraperScheduler {
       const hasCatalogData = scrapedData.catalogs && Object.values(scrapedData.catalogs).some(catalog => Array.isArray(catalog) && catalog.length > 0);
       
       if (!hasNewData && !hasCatalogData) {
-        logger.warn('No data scraped - cache will be empty');
+        // Nothing scraped (e.g. dead source domain / network block). Keep the
+        // existing cache rather than clearing it and blanking the whole addon.
+        logger.warn('No data scraped - keeping existing cache to avoid a blank catalog');
+        return;
       }
-      
-      // Update cache atomically (cache already cleared above)
-      const success = await fileCache.setAll(scrapedData);
+
+      // Replace cache atomically: setAllReplace clears then writes, so the old
+      // cache is only removed once we have fresh data ready to write.
+      const success = await fileCache.setAllReplace(scrapedData);
       
       if (success) {
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -109,7 +113,7 @@ class ScraperScheduler {
       logger.error('=== Scrape failed ===');
       logger.error('Error details:', error.message);
       logger.error('Stack:', error.stack);
-      logger.warn('Cache has been cleared but update failed - cache will be empty until next successful scrape');
+      logger.warn('Scrape failed - existing cache left untouched; catalog stays live until next successful scrape');
     } finally {
       this.isRunning = false;
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);

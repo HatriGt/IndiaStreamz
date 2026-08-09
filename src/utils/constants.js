@@ -1,5 +1,7 @@
 module.exports = {
-  BASE_URL: 'https://www.1tamilmv.lc/',
+  // Source mirror rotates domains frequently. Allow overriding via env so a dead
+  // domain can be swapped without a code change/redeploy; default to the current live one.
+  BASE_URL: process.env.SOURCE_BASE_URL || 'https://www.1tamilmv.pizza/',
   
   LANGUAGES: {
     TAMIL: 'tamil',
