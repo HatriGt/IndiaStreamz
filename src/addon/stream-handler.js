@@ -5,6 +5,29 @@ const TorboxClient = require('../integrations/torbox-client');
 const torboxConfig = require('../utils/torbox-config');
 const tokenManager = require('../utils/token-manager');
 const { encodeMagnet } = require('../utils/magnet-encoder');
+const imdbIndex = require('../cache/imdb-index');
+
+/**
+ * Load cached streams for a request id. IMDb ids (`tt123` / `tt123:S:E`) are
+ * resolved through the catalog index and may map to several internal titles
+ * (e.g. separate language releases); their streams are merged by infoHash.
+ */
+async function loadCachedStreams(type, id) {
+  const ids = /^tt\d+/.test(id) ? await imdbIndex.resolveStreamIds(type, id) : [id];
+  const lists = await Promise.all(ids.map((cid) => fileCache.getStreams(cid)));
+  const seen = new Set();
+  const merged = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const stream of list) {
+      const key = stream && (stream.infoHash || stream.externalUrl);
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      merged.push(stream);
+    }
+  }
+  return merged;
+}
 
 /**
  * Handle stream requests for movies and series
@@ -16,8 +39,9 @@ const { encodeMagnet } = require('../utils/magnet-encoder');
  * each other's API keys.
  */
 async function handleStream({ type, id, extra }) {
+  let cachedStreams = [];
   try {
-    logger.info(`[STREAM] Request received: type=${type}, id=${id}`);
+    logger.debug(`[STREAM] Request received: type=${type}, id=${id}`);
     
     // Validate type
     if (type !== 'movie' && type !== 'series') {
@@ -25,19 +49,15 @@ async function handleStream({ type, id, extra }) {
       return { streams: [] };
     }
 
-    // Load streams from cache
-    // For series, the id might be episode-specific (series-id-s1-e1)
-    const cachedStreams = await fileCache.getStreams(id);
+    // For series, the id is episode-specific (<id>:<season>:<episode>)
+    cachedStreams = await loadCachedStreams(type, id);
     
-    if (!cachedStreams || !Array.isArray(cachedStreams) || cachedStreams.length === 0) {
-      logger.warn(`[STREAM] No streams found in cache for ${type}: ${id}`);
+    if (cachedStreams.length === 0) {
+      logger.debug(`[STREAM] No streams found in cache for ${type}: ${id}`);
       return { streams: [] };
     }
-    
-    logger.info(`[STREAM] Found ${cachedStreams.length} streams in cache for ${type}: ${id}`);
 
     // Extract Torbox config - passed per-request via `extra` by the token route.
-    // Only needed when the user plays a movie.
     let torboxApiKey = extra?.torboxApiKey;
     let torboxApiUrl = extra?.torboxApiUrl || constants.TORBOX_API_URL;
     let token = extra?.token;
@@ -47,37 +67,89 @@ async function handleStream({ type, id, extra }) {
       torboxApiKey = torboxApiKey.trim().replace(/[\r\n\t]/g, '');
     }
 
-    // If no Torbox config, return cached streams as-is (infoHash for desktop)
+    // No Torbox config: plain torrent streams for the client's own engine
     if (!torboxApiKey) {
-      logger.debug(`No Torbox config, returning ${cachedStreams.length} streams with infoHash`);
-      return { streams: cachedStreams };
+      return { streams: sortStreams(cachedStreams).map(toTorrentStream) };
     }
 
-    // Initialize Torbox client
     const torbox = new TorboxClient(torboxApiKey, torboxApiUrl);
-    
-    // Get base URL for proxy URLs (if available from extra)
     const baseUrl = extra?.baseUrl || 'http://localhost:3005';
-    
-    // Get encrypted token part from extra (passed from server route)
     const encrypted = extra?.encrypted;
     
-    // Convert magnets to streaming URLs (check-only mode)
-    logger.debug(`Checking cache status for ${cachedStreams.length} streams with Torbox`);
     const convertedStreams = await convertStreams(cachedStreams, torbox, token, encrypted, baseUrl);
-    
-    logger.debug(`Returning ${convertedStreams.length} converted streams for ${type}: ${id}`);
     return { streams: convertedStreams };
   } catch (error) {
     logger.error(`Error in stream handler:`, error);
-    // Fallback to cached streams on error
-    try {
-      const cachedStreams = await fileCache.getStreams(id);
-      return { streams: cachedStreams || [] };
-    } catch (fallbackError) {
-      return { streams: [] };
+    return { streams: sortStreams(cachedStreams).map(toTorrentStream) };
+  }
+}
+
+/**
+ * Parse trackers out of a magnet link into Stremio `sources` entries.
+ */
+function magnetSources(magnet, infoHash) {
+  const sources = [];
+  if (typeof magnet === 'string') {
+    const query = magnet.split('?')[1] || '';
+    for (const part of query.split('&')) {
+      const [key, value] = part.split('=');
+      if (key === 'tr' && value) {
+        try {
+          sources.push(`tracker:${decodeURIComponent(value)}`);
+        } catch {
+          // skip malformed tracker
+        }
+      }
     }
   }
+  if (infoHash) sources.push(`dht:${infoHash}`);
+  return sources;
+}
+
+/**
+ * Plain torrent stream: exactly one playable source (infoHash). Clients that
+ * see both infoHash and externalUrl may open the magnet externally instead of
+ * playing it, so externalUrl is only kept when there is no infoHash.
+ */
+function toTorrentStream(stream) {
+  if (!stream || !stream.infoHash) return stream;
+  const { externalUrl, isCached, ...rest } = stream;
+  const sources = magnetSources(sanitizeMagnet(externalUrl), stream.infoHash);
+  return sources.length > 0 ? { ...rest, sources } : rest;
+}
+
+/**
+ * Numeric resolution from a stream name ("✅ 2160p", "S1E2 - 4K", ...).
+ */
+function qualityRank(name) {
+  const text = String(name || '');
+  if (/\b(4k|2160p|uhd)\b/i.test(text)) return 2160;
+  const match = text.match(/(\d{3,4})p/i);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * Cached streams first, then highest resolution first.
+ */
+function sortStreams(streams) {
+  return [...streams].sort((a, b) =>
+    ((b.isCached ? 1 : 0) - (a.isCached ? 1 : 0)) ||
+    (qualityRank(b.name) - qualityRank(a.name))
+  );
+}
+
+/**
+ * Resolve a promise, or the fallback once `ms` elapses, so a slow TorBox API
+ * never holds the stream list hostage.
+ */
+function withTimeout(promise, ms, fallback) {
+  let timer;
+  return Promise.race([
+    promise.catch(() => fallback),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallback), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -177,22 +249,20 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
     s && s.externalUrl ? { ...s, externalUrl: sanitizeMagnet(s.externalUrl) } : s
   );
 
-  // Limit to first 5 streams to avoid rate limiting
-  // User can still see all streams, but only top 5 will be converted
-  const streamsToConvert = cachedStreams.slice(0, 5);
-  const remainingStreams = cachedStreams.slice(5);
-  
   // Get API key for proxyHeaders (needed for authenticated streaming URLs)
   const apiKey = torbox.apiKey;
-  
-  // Fetch mylist FIRST before processing streams (needed for cache checking)
-  let myTorrents = null;
-  try {
-    myTorrents = await torbox.getMyTorrents();
-    logger.debug(`Fetched ${myTorrents.length} torrents from mylist for cache checking`);
-  } catch (error) {
-    logger.debug(`Failed to fetch mylist, will check individually: ${error.message}`);
-  }
+
+  // mylist and the batch infrastructure cache check are independent: run them
+  // together, each capped by the stream time budget. Both are TTL-memoized in
+  // the client, so repeat requests hit no network at all.
+  const allMagnets = cachedStreams
+    .map((s) => s.externalUrl)
+    .filter((m) => typeof m === 'string' && m.startsWith('magnet:'));
+  const budget = constants.STREAM_TORBOX_BUDGET_MS;
+  const [myTorrents, infraCacheMap] = await Promise.all([
+    withTimeout(torbox.getMyTorrents(), budget, null),
+    withTimeout(torbox.checkCachedBatch(allMagnets), budget, new Map())
+  ]);
 
   // Index mylist by infoHash once (O(1) lookups instead of scanning per stream).
   const torrentsByHash = new Map();
@@ -201,28 +271,15 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
     if (h) torrentsByHash.set(h, t);
   }
 
-  // ONE batch infrastructure cache-status call for ALL magnets, instead of a
-  // separate network round-trip per stream. Results are TTL-memoized in the
-  // client, so repeat stream requests hit zero network.
-  const allMagnets = cachedStreams
-    .map((s) => s.externalUrl)
-    .filter((m) => typeof m === 'string' && m.startsWith('magnet:'));
-  let infraCacheMap = new Map();
-  try {
-    infraCacheMap = await torbox.checkCachedBatch(allMagnets);
-  } catch (error) {
-    logger.debug(`Batch cache check failed, streams will show as not-cached: ${error.message}`);
-  }
-  
   // Process all streams in parallel - ONLY CHECK CACHE STATUS, DON'T ADD TORRENTS
-  const conversionPromises = streamsToConvert.map(async (stream) => {
+  const conversionPromises = cachedStreams.map(async (stream) => {
     try {
       // Get magnet link from externalUrl
       const magnetLink = stream.externalUrl;
       
       if (!magnetLink || !magnetLink.startsWith('magnet:')) {
         // No magnet link, keep original stream
-        return { ...stream, isCached: false };
+        return { ...toTorrentStream(stream), isCached: false };
       }
 
       // Resolve cache status from pre-fetched batch + mylist (no network call)
@@ -305,87 +362,44 @@ async function convertStreams(cachedStreams, torbox, token, encrypted, baseUrl) 
           };
         }
       } else {
-        // Not in mylist or not cached - return proxy URL (will add to Torbox when user plays)
-        logger.debug(`Torrent not cached, generating proxy URL (will add to Torbox when user plays)`);
+        // No ready URL yet: the proxy resolves it on play (adding the torrent
+        // to TorBox when it isn't cached). Without a proxy URL fall back to a
+        // plain torrent stream.
         const proxyUrl = token && encrypted && baseUrl ? generateProxyUrl(magnetLink, token, encrypted, baseUrl) : null;
-        
+        if (!proxyUrl) {
+          return { ...toTorrentStream({ ...stream, name: streamName }), isCached };
+        }
+        const notCachedNote = 'Not cached on TorBox - starts downloading on play';
         return {
-          name: streamName,
-          description: stream.description, // Preserve description
-          url: proxyUrl || undefined, // Use proxy URL if available
-          infoHash: stream.infoHash, // Keep infoHash as fallback for desktop Stremio
-          externalUrl: magnetLink,
+          name: isCached ? streamName : `⏳ ${streamName}`,
+          description: isCached
+            ? stream.description
+            : (stream.description ? `${stream.description}\n${notCachedNote}` : notCachedNote),
+          url: proxyUrl,
           isCached,
-          behaviorHints: stream.behaviorHints
+          behaviorHints: { ...(stream.behaviorHints || {}), notWebReady: true }
         };
       }
     } catch (error) {
-      // Error checking cache: fallback to infoHash
+      // Error checking cache: fall back to a plain torrent stream
       logger.error(`Error checking cache for stream:`, error.message);
-      return {
-        name: formatStreamNameWithEmoji(stream.name, false),
-        description: stream.description, // Preserve description
-        infoHash: stream.infoHash,
-        externalUrl: stream.externalUrl,
-        isCached: false,
-        behaviorHints: stream.behaviorHints
-      };
+      return { ...toTorrentStream(stream), name: formatStreamNameWithEmoji(stream.name, false), isCached: false };
     }
   });
   
   // Wait for all conversions in parallel
   const convertedResults = await Promise.allSettled(conversionPromises);
   const convertedStreams = convertedResults.map((result, index) => {
-    if (result.status === 'fulfilled') {
-      return result.value;
-    } else {
-      // If promise failed, return original stream with formatted name
-      const stream = streamsToConvert[index];
-      logger.error(`Stream conversion failed:`, result.reason);
-      return {
-        name: formatStreamNameWithEmoji(stream.name, false),
-        description: stream.description, // Preserve description
-        infoHash: stream.infoHash,
-        externalUrl: stream.externalUrl,
-        isCached: false,
-        behaviorHints: stream.behaviorHints
-      };
-    }
+    if (result.status === 'fulfilled') return result.value;
+    logger.error(`Stream conversion failed:`, result.reason);
+    return { ...toTorrentStream(cachedStreams[index]), isCached: false };
   });
-  
-  // Cache status for remaining streams: resolved synchronously from the batch
-  // + mylist signals already gathered above (no per-stream network calls).
-  const remainingConverted = remainingStreams.map((stream) => {
-    let isCached = false;
-    if (stream.externalUrl && stream.externalUrl.startsWith('magnet:')) {
-      const cached = resolveCacheStatus(torbox, stream.externalUrl, infraCacheMap, torrentsByHash);
-      isCached = !!(cached && (
-        cached.cached === true ||
-        cached.data?.is_cached === true ||
-        cached.data?.is_cached === 1 ||
-        cached.data?.cached === true
-      ));
-    }
-    return {
-      ...stream,
-      name: formatStreamNameWithEmoji(stream.name, isCached),
-      isCached
-    };
-  });
-  
-  // Combine all streams
-  const allStreams = [...convertedStreams, ...remainingConverted];
-  
-  // Sort streams: cached first, then non-cached
-  allStreams.sort((a, b) => {
-    const aCached = a.isCached ? 1 : 0;
-    const bCached = b.isCached ? 1 : 0;
-    return bCached - aCached; // Cached first (1 - 0 = 1, 0 - 1 = -1)
-  });
-  
-  // Remove isCached property before returning (not part of Stremio stream format)
-  return allStreams.map(({ isCached, ...stream }) => stream);
+
+  // isCached is internal only (not part of the Stremio stream format)
+  return sortStreams(convertedStreams).map(({ isCached, ...stream }) => stream);
 }
 
 module.exports = handleStream;
+module.exports.qualityRank = qualityRank;
+module.exports.toTorrentStream = toTorrentStream;
 

@@ -58,6 +58,8 @@ module.exports = {
   CATALOG_STALE_ERROR: 86400, // 1 day
   META_CACHE_MAX_AGE: 86400, // 1 day (enriched data is stable)
   STREAM_CACHE_MAX_AGE: 300, // 5 minutes (only when no per-user TorBox URLs)
+  STREAM_TORBOX_BUDGET_MS: 3500, // max wait on TorBox before answering a stream request
+  MANIFEST_CACHE_MAX_AGE: 300, // 5 minutes: config changes still show up quickly
   PAGE_SIZE: 100, // Stremio standard catalog page size
   
   PORT: process.env.PORT || 3005,
@@ -65,12 +67,15 @@ module.exports = {
   ADDON_ID: 'com.indiastreamz.tamilmv',
   ADDON_NAME: 'IndiaStreamz',
   ADDON_DESCRIPTION: 'TamilMV movies by language and quality',
-  ADDON_VERSION: '1.0.0',
+  ADDON_VERSION: '1.1.0',
   
   TORBOX_API_URL: 'https://api.torbox.app',
   TORBOX_TIMEOUT: 30000, // 30 seconds
   TORBOX_POLL_INTERVAL: 2000, // 2 seconds
-  TORBOX_PROXY_TIMEOUT: 300000, // 5 minutes (for non-cached torrents in proxy route)
+  // How long the proxy waits for a non-cached torrent before giving up. Players
+  // (Nuvio, Stremio) abandon the request well before minutes pass, so keep it short;
+  // the torrent keeps downloading on TorBox and plays instantly on retry.
+  TORBOX_PROXY_TIMEOUT: 45000,
   
   // Proxy route rate limiting
   PROXY_RATE_LIMIT_WINDOW: 60000, // 1 minute

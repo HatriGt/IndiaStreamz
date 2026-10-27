@@ -511,6 +511,7 @@ class TamilMVScraper {
                 runtime: tmdbMetadata.runtime || movieData.runtime,
                 releaseInfo: tmdbMetadata.releaseInfo || movieData.releaseInfo,
                 tmdbId: tmdbMetadata.tmdbId,
+                imdbId: tmdbMetadata.imdbId || movieData.imdbId || null,
                 tmdbTitle: tmdbMetadata.tmdbTitle || null, // Store TMDB title for prioritization
                 // New enriched fields
                 released: tmdbMetadata.released || movieData.released,
@@ -708,6 +709,7 @@ class TamilMVScraper {
                 runtime: tmdbMetadata.runtime || seriesData.runtime,
                 releaseInfo: tmdbMetadata.releaseInfo || seriesData.releaseInfo,
                 tmdbId: tmdbMetadata.tmdbId,
+                imdbId: tmdbMetadata.imdbId || seriesData.imdbId || null,
                 tmdbName: tmdbMetadata.tmdbName || null, // Store TMDB name for prioritization
                 // New enriched fields
                 released: tmdbMetadata.released || seriesData.released,

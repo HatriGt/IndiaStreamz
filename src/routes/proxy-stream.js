@@ -142,7 +142,7 @@ async function proxyStreamHandler(req, res) {
       return res.status(500).json({ error: 'Failed to get streaming URL for cached torrent' });
     }
     
-    // Not cached - wait for it to be ready (max 5 minutes)
+    // Not cached - wait for it to be ready (max TORBOX_PROXY_TIMEOUT)
     logger.debug(`[PROXY] Torrent ${torrentId} is not cached, waiting for it to be ready (max ${constants.TORBOX_PROXY_TIMEOUT / 1000}s)`);
     const streamingUrl = await torbox.waitForReady(torrentId, constants.TORBOX_PROXY_TIMEOUT);
     
@@ -166,9 +166,10 @@ async function proxyStreamHandler(req, res) {
       
       logger.warn(`[PROXY] Timeout waiting for torrent ${torrentId} to be ready`);
       const duration = Date.now() - startTime;
-      return res.status(408).json({ 
-        error: 'Request timeout', 
-        message: 'Torrent is not ready after 5 minutes. Please try again later.',
+      res.setHeader('Retry-After', '60');
+      return res.status(503).json({
+        error: 'Torrent downloading',
+        message: 'Added to TorBox and still downloading. Try playing again in a minute.',
         duration: `${Math.round(duration / 1000)}s`
       });
     }

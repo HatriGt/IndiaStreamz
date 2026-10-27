@@ -296,7 +296,7 @@ logger.info('Proxy route registered: /stremio/:token/:encrypted/proxy/:magnetHas
 // Token-based manifest route - validates token and returns manifest
 app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   const { token } = req.params;
-  logger.info(`[TOKEN] Manifest request with token: ${token.substring(0, 8)}...`);
+  logger.debug(`[TOKEN] Manifest request with token: ${token.substring(0, 8)}...`);
   
   // Verify token exists (will load from file if needed)
   const config = tokenManager.getConfigForToken(token);
@@ -309,10 +309,11 @@ app.get('/stremio/:token/:encrypted/manifest.json', async (req, res) => {
   // CONTENT of the series row in the catalog handler, not the manifest here.
   const manifestToServe = getManifestForCatalogs(config.visibleCatalogs);
   const catalogCount = manifestToServe.catalogs.length;
-  logger.info(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')}, seriesLanguages: ${JSON.stringify(config.seriesLanguages || 'all')})`);
+  logger.debug(`[TOKEN] Serving manifest with ${catalogCount} catalogs (visibleCatalogs: ${JSON.stringify(config.visibleCatalogs || 'all')}, seriesLanguages: ${JSON.stringify(config.seriesLanguages || 'all')})`);
   
-  // Prevent Stremio from caching manifest so catalog preference changes take effect
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  // Short cache: clients refetch the manifest often, and preference changes
+  // still take effect within a few minutes.
+  res.setHeader('Cache-Control', `max-age=${constants.MANIFEST_CACHE_MAX_AGE}`);
   res.json(manifestToServe);
 });
 
@@ -335,10 +336,10 @@ app.get('/stremio/:token/:encrypted/catalog/:type/*', async (req, res) => {
     extra.configuredSeriesLanguages = tokenConfig.seriesLanguages;
   }
 
-  logger.info(`[TOKEN CATALOG] Request for ${type}/${id} - Extra: ${JSON.stringify(extra)}`);
+  logger.debug(`[TOKEN CATALOG] Request for ${type}/${id} - Extra: ${JSON.stringify(extra)}`);
   try {
     const catalogData = await catalogHandler({ type, id, extra });
-    logger.info(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
+    logger.debug(`[TOKEN CATALOG] Returning ${catalogData.metas?.length || 0} items for ${type}/${id}`);
     applyCacheHeaders(res, catalogData);
     res.json(catalogData);
   } catch (error) {

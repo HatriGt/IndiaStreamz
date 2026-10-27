@@ -130,7 +130,8 @@ class TMDBClient {
         axios.get(`${this.baseUrl}/tv/${tmdbId}`, {
           params: {
             api_key: this.apiKey,
-            language: 'en-US'
+            language: 'en-US',
+            append_to_response: 'external_ids'
           },
           timeout: 10000
         }),
@@ -657,6 +658,7 @@ class TMDBClient {
       runtime: tmdbData.runtime || null,
       releaseInfo: releaseInfo,
       tmdbId: tmdbData.id,
+      imdbId: tmdbData.imdb_id || null,
       tmdbTitle: tmdbData.title || null, // TMDB official title (prioritize this)
       
       // New fields from existing API response
@@ -852,6 +854,7 @@ class TMDBClient {
       runtime: runtime,
       releaseInfo: releaseInfo,
       tmdbId: tmdbData.id,
+      imdbId: (tmdbData.external_ids && tmdbData.external_ids.imdb_id) || null,
       tmdbName: tmdbData.name || null, // TMDB official name (prioritize this)
       
       // New fields from existing API response

@@ -193,3 +193,9 @@ MIT
 
 This addon is for educational purposes. Ensure compliance with local laws and website terms of service when using this addon.
 
+
+## IMDb IDs and Nuvio
+
+Catalog items use the title's IMDb id (`tt...`) when TMDB matched one, so clients such as Nuvio show their own metadata, Trakt sync and subtitles, and other addons can serve streams for the same title. The addon answers stream requests for `tt` ids (`tt123` for movies, `tt123:season:episode` for series) by mapping them back to the cached TamilMV releases. Titles without an IMDb match keep their internal ids.
+
+Titles cached before this change have no IMDb id stored. Run a full re-scrape once (`/api/cache/full-replace`) to populate them.

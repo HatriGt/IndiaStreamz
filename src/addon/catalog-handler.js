@@ -17,10 +17,20 @@ const constants = require('../utils/constants');
  *   and `configuredSeriesLanguages` (lowercase ids from the token config).
  * @returns {Promise<Array>} series catalog items
  */
-async function getConsolidatedSeries(extra) {
+// Merged series list, rebuilt only when a language catalog array changes
+// (getCatalog returns the same instance until its file is rewritten).
+let seriesMemo = { catalogs: [], series: [] };
+
+async function getAllSeries() {
+  const catalogs = await Promise.all(
+    Object.values(constants.LANGUAGES).map((language) => fileCache.getCatalog(language))
+  );
+  const unchanged = catalogs.length === seriesMemo.catalogs.length &&
+    catalogs.every((c, i) => c === seriesMemo.catalogs[i]);
+  if (unchanged) return seriesMemo.series;
+
   const byId = new Map();
-  for (const language of Object.values(constants.LANGUAGES)) {
-    const catalog = await fileCache.getCatalog(language);
+  for (const catalog of catalogs) {
     if (!Array.isArray(catalog)) continue;
     for (const item of catalog) {
       if (item.type === 'series' && !byId.has(item.id)) {
@@ -28,8 +38,31 @@ async function getConsolidatedSeries(extra) {
       }
     }
   }
+  seriesMemo = { catalogs, series: Array.from(byId.values()) };
+  return seriesMemo.series;
+}
 
-  let series = Array.from(byId.values());
+/**
+ * Shape cached catalog items for clients: expose the IMDb id as the item id
+ * when we have one (so Nuvio/Stremio use their own metadata, Trakt and
+ * subtitles), drop internal-only fields, and dedupe items that collapse onto
+ * the same IMDb id (e.g. several seasons or language releases of one title).
+ */
+function toClientMetas(items) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const { season, ...meta } = item;
+    if (meta.imdb_id) meta.id = meta.imdb_id;
+    if (seen.has(meta.id)) continue;
+    seen.add(meta.id);
+    out.push(meta);
+  }
+  return out;
+}
+
+async function getConsolidatedSeries(extra) {
+  let series = await getAllSeries();
 
   const selected = extra && extra.language;
   const configured = extra && Array.isArray(extra.configuredSeriesLanguages)
@@ -119,7 +152,7 @@ async function handleCatalog({ type, id, extra }) {
     // Handle pagination: Stremio requests pages of PAGE_SIZE (default 100) via skip.
     // Returning fewer than a full page signals the end of the catalog.
     const skip = extra && extra.skip ? parseInt(extra.skip, 10) || 0 : 0;
-    metas = metas.slice(skip, skip + constants.PAGE_SIZE);
+    metas = toClientMetas(metas).slice(skip, skip + constants.PAGE_SIZE);
 
     logger.debug(`Returning catalog for ${id} (${type}): ${metas.length} items (skip=${skip})`);
     return {
@@ -135,4 +168,5 @@ async function handleCatalog({ type, id, extra }) {
 }
 
 module.exports = handleCatalog;
+module.exports.toClientMetas = toClientMetas;
 

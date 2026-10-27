@@ -56,22 +56,11 @@ class FileCache {
       const filePath = path.join(this.catalogsDir, `${language}.json`);
       
       // Check if we have it in cache
+      // All cache writes go through this module and invalidate the in-memory
+      // entry, so a hit is always current: no per-request fs.stat needed.
       const cached = this.catalogCache.get(language);
       if (cached) {
-        try {
-          // Check file modification time to see if cache is still valid
-          const stats = await fs.stat(filePath);
-          if (stats.mtimeMs === cached.mtime) {
-            // Cache is valid, return cached data
-            return cached.data;
-          }
-          // File was modified, need to reload
-        } catch (error) {
-          // File might not exist, but we have cache - return it anyway
-          if (error.code === 'ENOENT') {
-            return cached.data;
-          }
-        }
+        return cached.data;
       }
       
       // Load from disk
@@ -105,18 +94,11 @@ class FileCache {
       const filePath = path.join(this.moviesDir, `${movieId}.json`);
       
       // Check cache
+      // All cache writes go through this module and invalidate the in-memory
+      // entry, so a hit is always current: no per-request fs.stat needed.
       const cached = this.movieCache.get(movieId);
       if (cached) {
-        try {
-          const stats = await fs.stat(filePath);
-          if (stats.mtimeMs === cached.mtime) {
-            return cached.data;
-          }
-        } catch (error) {
-          if (error.code === 'ENOENT' && cached) {
-            return cached.data;
-          }
-        }
+        return cached.data;
       }
       
       // Load from disk
@@ -156,18 +138,11 @@ class FileCache {
       const filePath = path.join(this.streamsDir, `${movieId}.json`);
       
       // Check cache
+      // All cache writes go through this module and invalidate the in-memory
+      // entry, so a hit is always current: no per-request fs.stat needed.
       const cached = this.streamCache.get(movieId);
       if (cached) {
-        try {
-          const stats = await fs.stat(filePath);
-          if (stats.mtimeMs === cached.mtime) {
-            return cached.data;
-          }
-        } catch (error) {
-          if (error.code === 'ENOENT' && cached) {
-            return cached.data;
-          }
-        }
+        return cached.data;
       }
       
       // Load from disk

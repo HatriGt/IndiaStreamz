@@ -32,20 +32,25 @@ const seriesCatalog = {
   ]
 };
 
+const INTERNAL_ID_PREFIXES = ['tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-'];
+
 const manifest = {
   id: constants.ADDON_ID,
   version: constants.ADDON_VERSION,
   name: constants.ADDON_NAME,
   description: constants.ADDON_DESCRIPTION,
+  // Catalog items use IMDb ids (tt...) when TMDB matched one, so clients like
+  // Nuvio pull their own metadata, Trakt and subtitles. Meta for tt ids comes
+  // from the client's metadata provider (Cinemeta/TMDB); we only serve meta for
+  // our own ids, but answer stream requests for both.
   resources: [
     'catalog',
-    'meta',
-    'stream'
+    { name: 'meta', types: ['movie', 'series'], idPrefixes: INTERNAL_ID_PREFIXES },
+    { name: 'stream', types: ['movie', 'series'], idPrefixes: [...INTERNAL_ID_PREFIXES, 'tt'] }
   ],
   types: ['movie', 'series'],
   catalogs: [...Object.values(constants.LANGUAGES).map(buildCatalog), seriesCatalog],
-  // Only our catalog IDs - don't include tt/tmdb so we're not asked for content from other addons
-  idPrefixes: ['tamil-', 'telugu-', 'hindi-', 'malayalam-', 'kannada-', 'english-', 'multi-']
+  idPrefixes: [...INTERNAL_ID_PREFIXES, 'tt']
 };
 
 /**

@@ -80,7 +80,8 @@ function structureMovieForCatalog(movieData) {
     imdbRating: movieData.imdbRating || null,
     background: movieData.background || null,
     logo: movieData.logo || null,
-    runtime: movieData.runtime || null
+    runtime: movieData.runtime || null,
+    imdb_id: movieData.imdbId || null
   };
 }
 
@@ -138,7 +139,8 @@ function structureMovieForMeta(movieData) {
     voteCount: movieData.voteCount || null,
     productionCompanies: productionCompanies,
     spokenLanguages: spokenLanguages,
-    website: movieData.url || movieData.website || null
+    website: movieData.url || movieData.website || null,
+    imdb_id: movieData.imdbId || null
   };
 }
 
@@ -549,7 +551,10 @@ function structureSeriesForCatalog(seriesData) {
     imdbRating: seriesData.imdbRating || null,
     background: seriesData.background || null,
     logo: seriesData.logo || null,
-    runtime: seriesData.runtime || null
+    runtime: seriesData.runtime || null,
+    imdb_id: seriesData.imdbId || null,
+    season: seriesData.season ||
+      (Array.isArray(seriesData.seasons) && seriesData.seasons[0] ? seriesData.seasons[0].season : null)
   };
 }
 
@@ -650,6 +655,7 @@ function structureSeriesForMeta(seriesData) {
     productionCompanies: productionCompanies,
     spokenLanguages: spokenLanguages,
     website: seriesData.url || seriesData.website || null,
+    imdb_id: seriesData.imdbId || null,
     videos: videos,
     seasons: seasons
   };
