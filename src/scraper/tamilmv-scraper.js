@@ -407,7 +407,7 @@ class TamilMVScraper {
         // Clean title for TMDB search (this also extracts year)
         const { cleanTitle, year: extractedYear } = cleanTitleForTMDB(title);
         // Use year from movieData if available, otherwise use extracted year
-        const searchYear = movieData.year || extractedYear;
+        const searchYear = movieData.year || parseInt(movieData.releaseInfo, 10) || extractedYear;
 
         // Use searchMovieWithVariations instead of searchMovie for better matching
         return this.tmdbClient.searchMovieWithVariations(cleanTitle, searchYear)
@@ -605,7 +605,7 @@ class TamilMVScraper {
         // Clean title for TMDB search (this also extracts year)
         const { cleanTitle, year: extractedYear } = cleanTitleForTMDB(title);
         // Use year from seriesData if available, otherwise use extracted year
-        const searchYear = seriesData.year || extractedYear;
+        const searchYear = seriesData.year || parseInt(seriesData.releaseInfo, 10) || extractedYear;
 
         // Use searchTVWithVariations for better matching
         return this.tmdbClient.searchTVWithVariations(cleanTitle, searchYear)

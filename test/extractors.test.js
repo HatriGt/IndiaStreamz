@@ -117,3 +117,29 @@ test('structureSeriesForMeta emits a flat videos[] array of episodes', () => {
   assert.equal(meta.seasons.length, 1);
   assert.equal(meta.seasons[0].episodes.length, 3);
 });
+
+test('title cleaning handles real TamilMV titles that missed TMDB', () => {
+  const { cleanTitleForTMDB } = require('../src/scraper/extractors');
+  const cases = {
+    // trailing "e" used to be eaten by the episode-marker regex
+    'Promise (2026) Tamil TRUE WEB-DL - [1080p & 720p - AVC & HEVC - (DD+2.0 - 224Kbps) - 4GB]': 'Promise',
+    'Dark Syndicate (2026) Tamil TRUE WEB-DL': 'Dark Syndicate',
+    'Belphegor, Phantom of the Louvre (2001) BluRay - Original Audios': 'Belphegor, Phantom of the Louvre',
+    // empty leftover groups and edition tags
+    'Aquaman Duology (2018 - 2023) BluRay - Original Audios - [1080p & 720p - x264]': 'Aquaman Duology',
+    'Body Double (1984) [Unrated BluRay + Original Audios]': 'Body Double',
+    'Moana (BluRay + )': 'Moana',
+    'Jailer 2 (2026) Tamil New HQ PreDVD - [1080p & 720p - x264 - 2.6GB]': 'Jailer 2',
+    'Salt (2010) Directors Cut BluRay - Original Audios - [1080p]': 'Salt',
+    'Boys (2003) Tamil Remastered TRUE WEB-DL - 4K': 'Boys',
+    // sequel numbers stay; zero-padded episode numbers go
+    'Lust Stories 3 (2026) TRUE WEB-DL - [1080p & 720p]': 'Lust Stories 3',
+    'The Pitt 01': 'The Pitt',
+    'The Pitt S01 EP (01-08) TRUE WEB-DL - [Tamil + Eng]': 'The Pitt'
+  };
+  for (const [raw, expected] of Object.entries(cases)) {
+    assert.equal(cleanTitleForDisplay(raw), expected, raw);
+    assert.equal(cleanTitleForTMDB(raw).cleanTitle, expected, raw);
+  }
+  assert.equal(cleanTitleForTMDB('Salt (2010) Directors Cut').year, 2010);
+});

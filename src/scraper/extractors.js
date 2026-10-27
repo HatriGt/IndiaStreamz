@@ -120,7 +120,7 @@ function structureMovieForMeta(movieData) {
     background: movieData.background || null,
     logo: movieData.logo || null,
     description: (description && stripInvisibleChars(description)) || null,
-    releaseInfo: movieData.releaseInfo || null,
+    releaseInfo: movieData.releaseInfo || (movieData.year ? String(movieData.year) : null),
     released: movieData.released || null, // ISO 8601 date
     imdbRating: movieData.imdbRating || null,
     genres: genres,
@@ -630,7 +630,7 @@ function structureSeriesForMeta(seriesData) {
     background: seriesData.background || null,
     logo: seriesData.logo || null,
     description: description || null,
-    releaseInfo: seriesData.releaseInfo || null,
+    releaseInfo: seriesData.releaseInfo || (seriesData.year ? String(seriesData.year) : null),
     released: seriesData.released || null, // ISO 8601 date
     imdbRating: seriesData.imdbRating || null,
     genres: genres,
@@ -683,9 +683,20 @@ function stripInvisibleChars(str) {
   return str.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '');
 }
 
+/**
+ * TamilMV titles read "<Name> (<year>) <release info>", e.g.
+ * "Salt (2010) Directors Cut BluRay - [1080p ...]". When a "(19xx/20xx"
+ * group follows a non-empty name, everything from it on is release noise
+ * (edition tags, "New", "Remastered", audio/size lists).
+ */
+function nameBeforeYear(title) {
+  const match = title.match(/^(.*?\S)\s*[([]\s*(?:19|20)\d{2}\b/);
+  return match ? match[1].replace(/[\s\-:|]+$/, '') : title;
+}
+
 function cleanTitleForDisplay(title) {
   if (!title) return '';
-  title = stripInvisibleChars(title);
+  title = nameBeforeYear(stripInvisibleChars(title));
   
   // Remove common technical suffixes and patterns
   let cleaned = title
@@ -701,9 +712,9 @@ function cleanTitleForDisplay(title) {
     .trim();
   
   // Remove episode info from series titles (before year/language removal)
-  let nameOnly = cleaned.replace(/\s*S\d+\s*EP?\s*\([^)]*\)/gi, '');
-  nameOnly = nameOnly.replace(/\s*EP?\s*\([^)]*\)/gi, '');
-  nameOnly = nameOnly.replace(/\s*S\d+\s*EP?/gi, '');
+  let nameOnly = cleaned.replace(/\s*\bS\d+\s*EP?\s*\([^)]*\)/gi, '');
+  nameOnly = nameOnly.replace(/\s*\bEP?\s*\([^)]*\)/gi, '');
+  nameOnly = nameOnly.replace(/\s*\bS\d+\s*(?:EP?\b)?/gi, '');
   
   // Remove "HD +" and similar patterns
   nameOnly = nameOnly.replace(/\s*\(HD\s*\+\s*\)/gi, '');
@@ -722,14 +733,17 @@ function cleanTitleForDisplay(title) {
   // Remove trailing brackets
   nameOnly = nameOnly.replace(/\s*\]\s*$/, '').trim();
   
+  // Remove bracket groups emptied by the stripping above: "( - )", "(BluRay + )"
+  nameOnly = nameOnly.replace(/\s*\((?:\s*(?:BluRay|HD|Clean|Unrated|[-+&])\s*)*\)/gi, ' ');
+
   // Remove empty parentheses and day numbers (for "BIGG BOSS ()91 DAY 90")
   nameOnly = nameOnly.replace(/\s*\(\)\s*/g, ' '); // Remove empty parentheses
   nameOnly = nameOnly.replace(/\s*DAY\s+\d+\s*$/gi, ''); // Remove "DAY 90" at end
   nameOnly = nameOnly.replace(/\s*\(\d+\)\s*DAY\s+\d+\s*$/gi, ''); // Remove "(91) DAY 90"
   
-  // Remove standalone episode numbers at end: "The Pitt 01" -> "The Pitt"
-  // Only remove 1-2 digit numbers (likely episode numbers), not 4-digit years
-  nameOnly = nameOnly.replace(/\s+(\d{1,2})\s*$/, '').trim();
+  // Remove zero-padded episode numbers at end: "The Pitt 01" -> "The Pitt".
+  // Plain numbers are sequels ("Jailer 2", "Toy Story 5") and stay.
+  nameOnly = nameOnly.replace(/\s+0\d\s*$/, '').trim();
   
   // Remove year completely (no extraction, no re-addition)
   nameOnly = nameOnly.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
@@ -765,49 +779,15 @@ function cleanTitleForDisplay(title) {
  */
 function cleanTitleForTMDB(title) {
   if (!title) return { cleanTitle: '', year: null };
-  
+
   // Extract year first (before cleaning)
   const yearMatch = title.match(/\b(19|20)\d{2}\b/);
   const year = yearMatch ? parseInt(yearMatch[0]) : null;
-  
-  // Remove common technical suffixes and patterns
-  let cleaned = title
-    .trim()
-    .replace(/\s+/g, ' ')
-    // Remove quality indicators
-    .replace(/\s*-\s*\[.*?\]/g, '') // Remove [1080p & 720p...]
-    .replace(/\s*-\s*\(.*?\)/g, '') // Remove (DD+5.1...)
-    // Remove "Clean Audio" as a suffix (with dash) - do this first
-    .replace(/\s*-\s*Clean\s+Audio\s*$/gi, '')
-    // Remove common technical terms (including standalone "Clean Audio")
-    .replace(/\s*(TRUE|WEB-DL|HDRip|PreDVD|HQ|UHD|ESub|HC-ESub|Org Auds|Original Audios|HQ Clean Audio|HQ Clean Audios|Clean Audio)\s*/gi, ' ')
-    .replace(/\s*-\s*-\s*/g, ' ') // Remove multiple dashes
-    .replace(/\s+/g, ' ')
-    .trim();
-  
-  // Remove year from title (we'll use it separately for search)
-  let nameOnly = cleaned.replace(/\s*\(\d{4}\)\s*/g, ' ').trim();
-  nameOnly = nameOnly.replace(/\b(19|20)\d{2}\b/g, '').trim();
-  
-  // Remove language names (check anywhere in title)
-  const languages = ['Tamil', 'Telugu', 'Hindi', 'Malayalam', 'Kannada', 'English', 'TAM', 'TEL', 'HIN', 'MAL', 'KAN', 'ENG'];
-  for (const lang of languages) {
-    // Remove from end
-    const regexEnd = new RegExp(`\\s+${lang}\\s*$`, 'i');
-    nameOnly = nameOnly.replace(regexEnd, '').trim();
-    // Remove from beginning
-    const regexStart = new RegExp(`^${lang}\\s+`, 'i');
-    nameOnly = nameOnly.replace(regexStart, '').trim();
-    // Remove standalone (with word boundaries)
-    const regexStandalone = new RegExp(`\\b${lang}\\b`, 'gi');
-    nameOnly = nameOnly.replace(regexStandalone, '').trim();
-  }
-  
-  // Clean up multiple spaces and dashes
-  nameOnly = nameOnly.replace(/\s+/g, ' ').replace(/\s*-\s*-\s*/g, ' ').trim();
-  
+
+  // The display cleaner already strips release noise, episode markers,
+  // years and language tags; TMDB wants exactly that bare name.
   return {
-    cleanTitle: nameOnly || cleaned,
+    cleanTitle: cleanTitleForDisplay(title),
     year: year
   };
 }
@@ -867,6 +847,7 @@ module.exports = {
   structureEpisodeStreamsForStremio,
   cleanTitleForDisplay,
   cleanTitleForTMDB,
+  nameBeforeYear,
   normalizeTitle,
   extractYear,
   parseQuality,
